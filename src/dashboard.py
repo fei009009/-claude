@@ -28,6 +28,7 @@ _job_status: Dict[str, Any] = {
     "log_path": "",
 }
 _quality_cache: Dict[str, Any] = {"expires": 0.0, "snapshot_dir": "", "source": "", "quality": None}
+_name_map_cache: Dict[str, Any] = {"key": "", "expires": 0.0, "map": {}}
 
 
 def _json_bytes(data: Any) -> bytes:
@@ -67,6 +68,143 @@ def _load_latest_pipeline() -> Optional[Dict[str, Any]]:
         data["_file"] = path.name
         data["_mtime"] = datetime.fromtimestamp(path.stat().st_mtime).isoformat(timespec="seconds")
     return data
+
+
+def _iter_candidate_codes(pipeline: Dict[str, Any]) -> set[str]:
+    from src.common import norm_code
+
+    codes: set[str] = set()
+
+    def add(value: Any) -> None:
+        code = norm_code(value)
+        if code:
+            codes.add(code)
+
+    for result in pipeline.get("strategies", []) or []:
+        for row in result.get("top", []) or []:
+            add(row.get("code"))
+    for item in (pipeline.get("overlap") or {}).get("overlaps", []) or []:
+        add(item.get("code"))
+    for item in pipeline.get("diagnosis_results", []) or []:
+        add(item.get("code"))
+    diag = pipeline.get("diagnosis") or {}
+    for key in ("results", "top_picks", "watch_list"):
+        for item in diag.get(key, []) or []:
+            add(item.get("code"))
+    boundary = pipeline.get("boundary") or {}
+    for key in ("risks", "candidates", "critical"):
+        for item in boundary.get(key, []) or []:
+            add(item.get("code"))
+    return codes
+
+
+def _snapshot_file_candidates(snapshot_dir: Path, code: str) -> list[Path]:
+    from src.common import norm_code
+
+    normalized = norm_code(code)
+    digits = normalized[-6:] if len(normalized) >= 6 else str(code)[-6:]
+    market = normalized[:2] if normalized[:2] in {"SH", "SZ", "BJ"} else ""
+    markets = [market] if market else []
+    markets += [item for item in ("SH", "SZ", "BJ") if item not in markets]
+    paths: list[Path] = []
+    for prefix in markets:
+        paths.extend([
+            snapshot_dir / f"{prefix}#{digits}.txt",
+            snapshot_dir / f"{prefix}{digits}.txt",
+            snapshot_dir / f"{digits}.{prefix}.txt",
+        ])
+    return paths
+
+
+def _read_snapshot_stock_name(path: Path) -> str:
+    from src.common import repair_mojibake
+
+    for encoding in ("utf-8-sig", "utf-8", "gb18030", "gbk"):
+        try:
+            first_line = path.read_text(encoding=encoding, errors="strict").splitlines()[0]
+        except Exception:
+            continue
+        parts = first_line.strip().split()
+        if len(parts) >= 2:
+            return repair_mojibake(parts[1]).strip()
+    return ""
+
+
+def _build_name_map(snapshot_dir: Path, pipeline: Dict[str, Any]) -> Dict[str, str]:
+    from src.common import norm_code, repair_mojibake
+
+    codes = _iter_candidate_codes(pipeline)
+    cache_key = f"{Path(snapshot_dir).resolve()}|{','.join(sorted(codes))}"
+    now_ts = time.time()
+    if _name_map_cache.get("key") == cache_key and float(_name_map_cache.get("expires", 0) or 0) > now_ts:
+        return dict(_name_map_cache.get("map") or {})
+
+    name_map: Dict[str, str] = {}
+    for result in pipeline.get("strategies", []) or []:
+        for row in result.get("top", []) or []:
+            code = norm_code(row.get("code"))
+            name = repair_mojibake(row.get("name", "")).strip()
+            if code and name:
+                name_map.setdefault(code, name)
+    for item in (pipeline.get("overlap") or {}).get("overlaps", []) or []:
+        code = norm_code(item.get("code"))
+        name = repair_mojibake(item.get("name", "")).strip()
+        if code and name:
+            name_map.setdefault(code, name)
+
+    for code in codes:
+        for path in _snapshot_file_candidates(snapshot_dir, code):
+            if not path.exists():
+                continue
+            name = _read_snapshot_stock_name(path)
+            if name:
+                name_map[code] = name
+                break
+
+    _name_map_cache.update({"key": cache_key, "expires": now_ts + 60, "map": dict(name_map)})
+    return name_map
+
+
+def _display_stock_name(code: Any, name: Any, name_map: Dict[str, str]) -> str:
+    from src.common import norm_code, repair_mojibake
+
+    normalized = norm_code(code)
+    mapped = name_map.get(normalized, "")
+    if mapped:
+        return mapped
+    return repair_mojibake(name).strip()
+
+
+def _clean_diagnosis_item(item: Dict[str, Any], name_map: Dict[str, str]) -> Dict[str, Any]:
+    cleaned = dict(item)
+    cleaned["name"] = _display_stock_name(cleaned.get("code"), cleaned.get("name", ""), name_map)
+    return cleaned
+
+
+def _clean_diagnosis_summary_text(summary: str, items: list[Dict[str, Any]], name_map: Dict[str, str]) -> str:
+    text = str(summary or "")
+    if not text:
+        return ""
+    for item in items:
+        code = str(item.get("code") or "")
+        old_name = str(item.get("name") or "")
+        new_name = _display_stock_name(code, old_name, name_map)
+        if code and old_name and new_name and old_name != new_name:
+            text = text.replace(f"{code} {old_name}", f"{code} {new_name}")
+            text = text.replace(old_name, new_name)
+    return text
+
+
+def _clean_boundary(boundary: Dict[str, Any], name_map: Dict[str, str]) -> Dict[str, Any]:
+    cleaned = {"stats": boundary.get("stats", {})}
+    for key in ("risks", "candidates"):
+        rows = []
+        for item in boundary.get(key, []) or []:
+            row = dict(item)
+            row["name"] = _display_stock_name(row.get("code"), row.get("name", ""), name_map)
+            rows.append(row)
+        cleaned[key] = rows
+    return cleaned
 
 
 def _latest_factor_panel() -> Dict[str, Any]:
@@ -183,9 +321,13 @@ def _load_recent_pipelines(n: int = 10) -> list[Dict[str, Any]]:
     return rows
 
 
-def _diagnosis_summary(pipeline: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def _diagnosis_summary(pipeline: Dict[str, Any], name_map: Dict[str, str]) -> Optional[Dict[str, Any]]:
     diag = pipeline.get("diagnosis") or {}
-    raw_results = pipeline.get("diagnosis_results") or diag.get("results") or []
+    raw_source_items = pipeline.get("diagnosis_results") or diag.get("results") or []
+    raw_results = [
+        _clean_diagnosis_item(item, name_map)
+        for item in raw_source_items
+    ]
     if not diag and not raw_results:
         return None
     signals = diag.get("signal_distribution") or {}
@@ -194,19 +336,33 @@ def _diagnosis_summary(pipeline: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             signal = item.get("signal", "")
             if signal:
                 signals[signal] = signals.get(signal, 0) + 1
-    top_picks = diag.get("top_picks") or [
-        item for item in raw_results if item.get("signal") in ("STRONG_BUY", "BUY")
+    top_picks = [
+        _clean_diagnosis_item(item, name_map)
+        for item in (diag.get("top_picks") or [
+            item for item in raw_results if item.get("signal") in ("STRONG_BUY", "BUY")
+        ])
     ][:10]
+    watch_list = [
+        _clean_diagnosis_item(item, name_map)
+        for item in (diag.get("watch_list") or [
+            item for item in raw_results if item.get("signal") == "WATCH"
+        ])
+    ][:10]
+    summary_text = _clean_diagnosis_summary_text(
+        str(diag.get("summary", "")),
+        list(raw_source_items) + raw_results + top_picks + watch_list,
+        name_map,
+    )
     return {
         "enabled": diag.get("enabled", True),
         "role": diag.get("role", "validation_layer"),
         "independent_strategy": bool(diag.get("independent_strategy", False)),
         "total": diag.get("total", len(raw_results)),
         "signal_distribution": signals,
-        "top_picks": top_picks[:10],
-        "watch_list": (diag.get("watch_list") or [])[:10],
+        "top_picks": top_picks,
+        "watch_list": watch_list,
         "report_path": diag.get("report_path", ""),
-        "summary": diag.get("summary", ""),
+        "summary": summary_text,
         "error": diag.get("error", ""),
     }
 
@@ -214,7 +370,6 @@ def _diagnosis_summary(pipeline: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 def _v2_status() -> Dict[str, Any]:
     from src.quality_gate import audit_snapshot, resolve_snapshot
     from src.settings import load_settings
-    from src.common import repair_mojibake
     from src.x1_preheat import latest_status as x1_preheat_status
 
     cfg = load_settings()
@@ -266,6 +421,7 @@ def _v2_status() -> Dict[str, Any]:
     if not pipeline:
         return status
 
+    name_map = _build_name_map(snapshot_dir, pipeline)
     summary = pipeline.get("summary", {})
     strategies = []
     for result in pipeline.get("strategies", []):
@@ -285,7 +441,7 @@ def _v2_status() -> Dict[str, Any]:
                 {
                     "rank": row.get("rank", idx + 1),
                     "code": row.get("code", ""),
-                    "name": repair_mojibake(row.get("name", "")),
+                    "name": _display_stock_name(row.get("code", ""), row.get("name", ""), name_map),
                     "pct_chg": row.get("pct_chg"),
                     "score": row.get("lift_score", row.get("wr", row.get("score"))),
                     "tag": row.get("tag", ""),
@@ -302,7 +458,7 @@ def _v2_status() -> Dict[str, Any]:
     for item in overlap.get("overlaps", [])[:30]:
         overlaps.append({
             "code": item.get("code", ""),
-            "name": repair_mojibake(item.get("name", "")),
+            "name": _display_stock_name(item.get("code", ""), item.get("name", ""), name_map),
             "strategies": item.get("strategies", []),
             "strategy_count": item.get("strategy_count", 0),
             "ranks": item.get("ranks", {}),
@@ -314,9 +470,11 @@ def _v2_status() -> Dict[str, Any]:
 
     boundary = pipeline.get("boundary")
     if boundary:
+        clean_boundary = _clean_boundary(boundary, name_map)
         status["boundary"] = {
-            "stats": boundary.get("stats", {}),
-            "risks": boundary.get("risks", [])[:30],
+            "stats": clean_boundary.get("stats", {}),
+            "risks": clean_boundary.get("risks", [])[:30],
+            "candidates": clean_boundary.get("candidates", [])[:50],
         }
 
     status["latest_run"] = {
@@ -333,7 +491,7 @@ def _v2_status() -> Dict[str, Any]:
         "strategies": strategies,
         "overlaps": overlaps,
         "by_count": overlap.get("by_count", {}),
-        "xgb_diagnosis": _diagnosis_summary(pipeline),
+        "xgb_diagnosis": _diagnosis_summary(pipeline, name_map),
         "x1_preheat": pipeline.get("x1_preheat") or x1_status,
         "snapshot_quality": pipeline.get("snapshot_quality"),
     }

@@ -42,7 +42,16 @@ def safe_int(value: Any, default: int = 0) -> int:
         return default
 
 
-_MOJIBAKE_MARKERS = ("鑺", "鍏", "娴", "榫", "鐢", "绉", "灞", "闀", "閫", "锛", "涓", "唤", "濂")
+_MOJIBAKE_MARKERS = (
+    "鑺", "鍏", "娴", "榫", "鐢", "绉", "灞", "闀", "閫", "锛", "涓", "唤", "濂",
+    "鐩", "鍦", "瓒", "鏅", "鎬", "浜", "椹", "绁", "姝", "闃", "鍩", "鏄", "鏂",
+    "鍦", "鍒", "鍙", "鍚", "鏃", "鐣", "缇", "胯", "櫣", "庤", "彵", "\ufffd",
+)
+
+
+def has_mojibake(value: Any) -> bool:
+    text = str(value or "")
+    return bool(text) and any(marker in text for marker in _MOJIBAKE_MARKERS)
 
 
 def repair_mojibake(value: Any) -> str:
@@ -55,7 +64,7 @@ def repair_mojibake(value: Any) -> str:
     text = str(value or "")
     if not text:
         return ""
-    if not any(marker in text for marker in _MOJIBAKE_MARKERS):
+    if not has_mojibake(text):
         return text
     candidates = [text]
     for source_encoding in ("gb18030", "gbk"):

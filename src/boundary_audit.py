@@ -4,6 +4,19 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from src.common import norm_code, repair_mojibake
+
+
+def _read_snapshot_lines(path: Path) -> List[str]:
+    for encoding in ("utf-8-sig", "utf-8", "gb18030", "gbk"):
+        try:
+            text = path.read_text(encoding=encoding, errors="strict")
+            return text.strip().split("\n")
+        except Exception:
+            continue
+    text = path.read_text(encoding="utf-8", errors="replace")
+    return text.strip().split("\n")
+
 
 def scan_boundary_candidates(
     snapshot_dir: Path,
@@ -50,16 +63,16 @@ def scan_boundary_candidates(
     scanned = 0
     critical = 0
 
-    for txt_file in snapshot_dir.glob("SH#*.txt"):
+    for txt_file in snapshot_dir.glob("*.txt"):
         scanned += 1
         try:
-            lines = txt_file.read_text(encoding="gbk", errors="replace").strip().split("\n")
+            lines = _read_snapshot_lines(txt_file)
             if len(lines) < 3:
                 continue
 
             # 解析股票名
             header = lines[0].strip().split()
-            name = header[1] if len(header) >= 2 else ""
+            name = repair_mojibake(header[1]) if len(header) >= 2 else ""
             full_code = txt_file.stem  # e.g., SH#600000
 
             # 解析最后两根K线计算涨幅
@@ -87,7 +100,7 @@ def scan_boundary_candidates(
 
             if pct_range[0] <= pct <= pct_range[1]:
                 critical += 1
-                code = full_code.replace("#", "")
+                code = norm_code(full_code)
                 in_top = full_code in selected_codes or code in selected_codes
                 ranks = rank_map.get(full_code, rank_map.get(code, {}))
 
