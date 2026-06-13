@@ -25,6 +25,12 @@ _CFG: Dict[str, Any] = {}
 
 
 def _read_text_head(path: Path) -> str:
+    for encoding in ("utf-8-sig", "utf-8", "gb18030", "gbk"):
+        try:
+            with path.open("r", encoding=encoding) as f:
+                return f.readline().strip()
+        except Exception:
+            continue
     try:
         with path.open("r", encoding="gbk", errors="ignore") as f:
             return f.readline().strip()
@@ -46,11 +52,16 @@ def _is_st_stock(path: Path) -> bool:
 
 
 def _read_kline_raw(path: Path) -> Optional[Dict[str, np.ndarray]]:
-    try:
-        raw = path.read_text(encoding="gbk", errors="ignore").splitlines()
-    except Exception:
+    raw: Optional[List[str]] = None
+    for encoding in ("utf-8-sig", "utf-8", "gb18030", "gbk"):
         try:
-            raw = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+            raw = path.read_text(encoding=encoding).splitlines()
+            break
+        except Exception:
+            continue
+    if raw is None:
+        try:
+            raw = path.read_text(encoding="gbk", errors="ignore").splitlines()
         except Exception:
             return None
     if len(raw) < 62:

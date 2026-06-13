@@ -35,6 +35,7 @@ class DiagnosisResult:
         self.recommendation: str = ""
         self.diagnosis_quality: Dict[str, Any] = {}
         self.best_rule: Dict[str, Any] = {}
+        self.extra: Dict[str, Any] = {}
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -50,6 +51,7 @@ class DiagnosisResult:
             "recommendation": self.recommendation,
             "diagnosis_quality": self.diagnosis_quality,
             "best_rule": self.best_rule,
+            "extra": self.extra,
         }
 
     def _matched_rule_count(self) -> int:

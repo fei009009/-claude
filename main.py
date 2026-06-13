@@ -12,9 +12,9 @@ sys.path.insert(0, str(ROOT))
 
 from src.boundary_audit import scan_boundary_candidates
 from src.dashboard import run as run_dashboard
-from src.diagnosis.engine import DiagnosisEngine
 from src.diagnosis.annotate import annotate_all
 from src.diagnosis.service import run_xgb_validation_layer
+from src.diagnosis.xgb_calibration import build_xgb_calibration_status
 from src.candidate_factor_panel import build_candidate_factor_panel
 from src.pipeline import build_overlap_analysis, run_all_strategies
 from src.quality_gate import audit_snapshot, format_quality_summary, resolve_snapshot
@@ -235,24 +235,81 @@ def cmd_diagnose(args: argparse.Namespace) -> int:
     if not codes:
         print("示例: python main.py diagnose --codes SH600000,SZ000001")
         return 1
-    engine = DiagnosisEngine(
-        xgb_dir=Path(str(cfg["paths"]["xgb_dir"])),
-        xgbzx_dir=Path(str(cfg["paths"].get("xgbzx_dir", ""))),
-        data_dir=snapshot_dir,
-        x1_dir=Path(str(cfg["paths"].get("x1_xin_dir", ""))),
+    fake_results = [{"ok": True, "strategy_name": "manual", "top": [{"code": code, "name": ""} for code in codes]}]
+    items, summary = run_xgb_validation_layer(
+        cfg,
+        fake_results,
+        snapshot_dir=snapshot_dir,
+        candidates_source="manual diagnose",
+        persist=True,
     )
-    if not engine.validate_environment() or not engine.load_models():
-        print("XGB 诊断环境未就绪")
-        return 2
-    for item in engine.diagnose_candidates([{"code": code, "name": ""} for code in codes], snapshot_dir=snapshot_dir):
+    print(summary.get("summary") or f"诊断完成: {len(items)} 只")
+    if summary.get("report_path"):
+        print(f"批量报告: {summary['report_path']}")
+    for item in items:
+        extra = item.extra or {}
+        rich = extra.get("rich_report") or {}
         print(
             f"\n{item.code} {item.name}\n"
             f"  信号: {item.signal}  综合: {item.blended_score:.1%}\n"
             f"  模型: {item.model_score:.1%}  规则: {item.rule_score:.1%}"
         )
+        events = extra.get("event_probabilities") or {}
+        if events:
+            print(
+                f"  概率: 冲高5%={events.get('high5', 0):.1%} "
+                f"收盘5%={events.get('close5', 0):.1%} "
+                f"次日强度={events.get('next5', 0):.1%}"
+            )
         if item.risk_flags:
             print(f"  风险: {', '.join(item.risk_flags)}")
+        if rich.get("final_view"):
+            print(f"  研判: {rich['final_view']}")
+        if rich.get("markdown"):
+            print(f"  明细: {rich['markdown']}")
     return 0
+
+
+def cmd_xgb_calibration(args: argparse.Namespace) -> int:
+    cfg = load_settings()
+    report = build_xgb_calibration_status(
+        cfg,
+        top_n=args.top_n,
+        run_backtest=args.run_backtest,
+        start_date=args.start_date,
+        min_stocks_per_day=args.min_stocks_per_day,
+        timeout=args.timeout,
+        persist=True,
+    )
+    print(
+        f"XGB校准状态: 诊断资产={'OK' if report.get('ready_for_diagnosis') else '缺失'} | "
+        f"硬信号依据={'OK' if report.get('ready_for_hard_signal') else '不足'}"
+    )
+    latest = report.get("latest_backtest") or {}
+    if latest.get("exists"):
+        print(f"最新回测: {latest.get('path', '')}")
+        for target, stat in (latest.get("targets") or {}).items():
+            print(
+                f"  {target}: TopN={stat.get('daily_topN_mean')} "
+                f"Base={stat.get('daily_baseline_mean')} Lift={stat.get('lift')} "
+                f"胜出日={stat.get('days_beating_baseline')}"
+            )
+    else:
+        print("最新回测: 未发现")
+    if report.get("backtest_run"):
+        run = report["backtest_run"]
+        print(f"本次回测: {'OK' if run.get('ok') else 'FAIL'}")
+        if run.get("stderr_tail"):
+            print(run["stderr_tail"][-800:])
+    if report.get("missing"):
+        print("缺失项:")
+        for item in report["missing"]:
+            print(f"  - {item}")
+    print("下一步:")
+    for item in report.get("work_needed") or []:
+        print(f"  - {item}")
+    print(f"报告: {report.get('report_path', '')}")
+    return 0 if report.get("ready_for_diagnosis") else 2
 
 
 def cmd_tail_once(args: argparse.Namespace) -> int:
@@ -479,6 +536,14 @@ def main() -> int:
     diagnose.add_argument("--codes", required=True)
     diagnose.add_argument("--snapshot")
     diagnose.set_defaults(func=cmd_diagnose)
+
+    xgb_cal = sub.add_parser("xgb-calibration", help="检查/运行 XGB 25分箱全量回测校准")
+    xgb_cal.add_argument("--top-n", type=int, default=50)
+    xgb_cal.add_argument("--run-backtest", action="store_true")
+    xgb_cal.add_argument("--start-date", type=int, default=0, help="YYYYMMDD；0 表示使用训练配置里的 test_start")
+    xgb_cal.add_argument("--min-stocks-per-day", type=int, default=500)
+    xgb_cal.add_argument("--timeout", type=int, default=900)
+    xgb_cal.set_defaults(func=cmd_xgb_calibration)
 
     tail_once = sub.add_parser("tail-once", help="尾盘单轮分析")
     tail_once.add_argument("--push", action="store_true")

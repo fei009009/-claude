@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 import time
@@ -11,6 +12,14 @@ from typing import Any, Dict, List, Optional
 
 from src.common import norm_code, output_root, repair_mojibake
 from src.strategies.base import StrategyAdapter, StrategyResult
+
+
+TARGET_SUMMARY_FILES = (
+    "y_close_5d_5pct_merged.json",
+    "y_close_5d_0pct_merged.json",
+    "y_high_5d_5pct_merged.json",
+    "y_next_5pct_merged.json",
+)
 
 
 class X1BeamAdapter(StrategyAdapter):
@@ -94,7 +103,8 @@ class X1BeamAdapter(StrategyAdapter):
         workers: int,
         timeout_seconds: int,
     ) -> Path:
-        self._ensure_summary_files(overwrite=False)
+        reference_x1_dir = Path(str((cfg.get("paths") or {}).get("reference_x1_dir") or ""))
+        self._ensure_summary_files(reference_dir=reference_x1_dir, overwrite=False)
         out_dir = self._cache_dir(cfg)
         trade_date = cache_meta.get("trade_date") or datetime.now().strftime("%Y-%m-%d")
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -236,9 +246,42 @@ class X1BeamAdapter(StrategyAdapter):
         except Exception:
             return {}
 
-    def _ensure_summary_files(self, overwrite: bool = False) -> None:
+    def _ensure_summary_files(self, reference_dir: Optional[Path] = None, overwrite: bool = False) -> None:
         summary_dir = self._dir / "cache" / "_summary"
         summary_dir.mkdir(parents=True, exist_ok=True)
+        current_quality = self._summary_quality(summary_dir)
+        reference_summary = Path(reference_dir or "") / "cache" / "_summary" if reference_dir else None
+        reference_quality = self._summary_quality(reference_summary) if reference_summary else {"complete": False}
+
+        should_use_reference = (
+            bool(reference_summary)
+            and reference_quality.get("complete")
+            and (
+                overwrite
+                or not current_quality.get("complete")
+                or current_quality.get("compatibility_generated")
+                or current_quality.get("same_sized_pool")
+            )
+        )
+        if should_use_reference:
+            for name in TARGET_SUMMARY_FILES:
+                shutil.copy2(reference_summary / name, summary_dir / name)
+            manifest = {
+                "source": str(reference_summary),
+                "mode": "synced_from_reference_x1",
+                "synced_at": datetime.now().isoformat(timespec="seconds"),
+                "reference_quality": reference_quality,
+                "previous_quality": current_quality,
+            }
+            (summary_dir / "v2_summary_manifest.json").write_text(
+                json.dumps(manifest, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            return
+
+        if current_quality.get("complete") and not overwrite:
+            return
+
         source = self._dir / "cache" / "beam_merged.json"
         if not source.exists():
             source = self._dir / "cache" / "beam_all_deduped.json"
@@ -274,8 +317,44 @@ class X1BeamAdapter(StrategyAdapter):
                 "target": target,
                 "desc": desc,
                 "source": str(source),
+                "mode": "compatibility_generated",
                 "total_raw": len(normalized),
                 "total_deduped": len(normalized),
                 "combos": normalized,
             }
             out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _summary_quality(self, summary_dir: Optional[Path]) -> Dict[str, Any]:
+        if not summary_dir:
+            return {"complete": False, "path": ""}
+        summary_dir = Path(summary_dir)
+        counts: Dict[str, int] = {}
+        sources: Dict[str, str] = {}
+        sizes: Dict[str, int] = {}
+        missing: List[str] = []
+        for name in TARGET_SUMMARY_FILES:
+            path = summary_dir / name
+            if not path.exists():
+                missing.append(name)
+                continue
+            sizes[name] = path.stat().st_size
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                counts[name] = len(payload.get("combos") or [])
+                sources[name] = str(payload.get("source") or payload.get("mode") or "")
+            except Exception:
+                counts[name] = 0
+                sources[name] = "unreadable"
+        complete = not missing and all(counts.get(name, 0) > 0 for name in TARGET_SUMMARY_FILES)
+        nonzero_counts = [counts.get(name, 0) for name in TARGET_SUMMARY_FILES if counts.get(name, 0) > 0]
+        source_text = "|".join(sources.values()).lower()
+        return {
+            "path": str(summary_dir),
+            "complete": complete,
+            "missing": missing,
+            "counts": counts,
+            "sizes": sizes,
+            "sources": sources,
+            "compatibility_generated": "beam_merged" in source_text or "compatibility_generated" in source_text,
+            "same_sized_pool": bool(nonzero_counts) and len(set(nonzero_counts)) == 1 and len(nonzero_counts) == len(TARGET_SUMMARY_FILES),
+        }

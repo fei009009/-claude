@@ -3,9 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
-from src.common import norm_code, write_report
+from src.common import norm_code, repair_mojibake, write_report
+from src.diagnosis.bin_sidecar import run_bin_sidecar
 from src.diagnosis.engine import DiagnosisEngine, DiagnosisResult
 from src.diagnosis.report import build_diagnosis_report
+from src.diagnosis.xgb_calibration import ensure_xgb_vendor_assets
 
 
 def collect_candidates_from_strategy_results(results: Iterable[Dict[str, Any]]) -> List[Dict[str, str]]:
@@ -19,7 +21,7 @@ def collect_candidates_from_strategy_results(results: Iterable[Dict[str, Any]]) 
             if not code or code in seen:
                 continue
             seen.add(code)
-            candidates.append({"code": code, "name": str(row.get("name") or "")})
+            candidates.append({"code": code, "name": repair_mojibake(row.get("name") or "")})
     return candidates
 
 
@@ -36,8 +38,51 @@ def run_xgb_validation_layer(
     if not candidates:
         return [], {"enabled": True, "role": "validation_layer", "total_diagnosed": 0, "reason": "no_candidates"}
 
+    diagnosis_cfg = cfg.get("diagnosis", {}) or {}
+    xgb_dir = Path(str((cfg.get("paths") or {}).get("xgb_dir") or ""))
+    if diagnosis_cfg.get("engine", "bin_sidecar") != "legacy":
+        try:
+            ensure_xgb_vendor_assets(cfg, include_samples=False)
+            diagnosis_results, sidecar_meta = run_bin_sidecar(
+                xgb_dir=xgb_dir,
+                snapshot_dir=snapshot_dir or Path(""),
+                candidates=candidates,
+                limit_rules=int(diagnosis_cfg.get("bin_limit_rules", 0) or 0),
+                top_matches=int(diagnosis_cfg.get("bin_top_matches", 8) or 8),
+                rich_reports=bool(diagnosis_cfg.get("rich_reports", True)),
+                rich_report_top_n=int(diagnosis_cfg.get("rich_report_top_n", 10) or 10),
+            )
+            if diagnosis_results:
+                report = build_diagnosis_report(
+                    diagnosis_results,
+                    candidates_source=candidates_source,
+                    snapshot_dir=str(snapshot_dir) if snapshot_dir else "",
+                )
+                if persist:
+                    report_path = write_report("xgb_diagnosis", report, cfg)
+                    report["report_path"] = str(report_path)
+                summary = {
+                    "enabled": True,
+                    "role": "validation_layer",
+                    "engine": sidecar_meta.get("engine", "xgb_25bin_sidecar"),
+                    "independent_strategy": False,
+                    "total": report.get("total_diagnosed", 0),
+                    "signal_distribution": report.get("signal_distribution") or {},
+                    "score_distribution": report.get("score_distribution") or {},
+                    "top_picks": report.get("top_picks") or [],
+                    "watch_list": report.get("watch_list") or [],
+                    "report_path": report.get("report_path", ""),
+                    "summary": report.get("summary", ""),
+                    "sidecar": sidecar_meta,
+                }
+                return diagnosis_results, summary
+        except Exception as exc:
+            if not diagnosis_cfg.get("allow_legacy_fallback", True):
+                raise
+            print(f"[DiagnosisService] bin sidecar fallback: {exc}")
+
     engine = DiagnosisEngine(
-        xgb_dir=Path(str((cfg.get("paths") or {}).get("xgb_dir") or "")),
+        xgb_dir=xgb_dir,
         xgbzx_dir=Path(str((cfg.get("paths") or {}).get("xgbzx_dir") or "")),
         data_dir=snapshot_dir if snapshot_dir else None,
         x1_dir=Path(str((cfg.get("paths") or {}).get("x1_xin_dir") or "")),

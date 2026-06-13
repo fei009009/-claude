@@ -58,10 +58,17 @@ strategies:
 diagnosis:
   enabled: true
   role: validation_layer
+  engine: bin_sidecar
+  allow_legacy_fallback: true
   xgb_model_blend_weight: 0.72
   rule_blend_weight: 0.28
+  bin_limit_rules: 0
+  bin_top_matches: 8
+  rich_reports: true
+  rich_report_top_n: 10
   report_top_n: 30
   independent_strategy: false
+  calibration_status: observation_until_full_backtest_refresh
 
 automation:
   tail:

@@ -70,7 +70,23 @@ def _build_summary_text(results: List[DiagnosisResult], signals: Dict[str, int])
     if top3:
         parts.append("Top 诊断：")
         for index, item in enumerate(top3, 1):
-            parts.append(f"  #{index} {item.code} {item.name} 评分={item.blended_score:.1%} 信号={item.signal}")
+            extra = getattr(item, "extra", {}) or {}
+            events = extra.get("event_probabilities") or {}
+            pattern = (extra.get("pattern") or {}).get("label", "")
+            detail = ""
+            if events:
+                detail = (
+                    f" 5日冲高={float(events.get('high5') or 0):.1%}"
+                    f" 次日={float(events.get('next5') or 0):.1%}"
+                )
+            if pattern:
+                detail += f" 模式={pattern}"
+            rich = extra.get("rich_report") or {}
+            if rich.get("rating"):
+                detail += f" 评级={rich.get('rating')}"
+            if rich.get("risk_level"):
+                detail += f" 风险={rich.get('risk_level')}"
+            parts.append(f"  #{index} {item.code} {item.name} 评分={item.blended_score:.1%} 信号={item.signal}{detail}")
     return "\n".join(parts)
 
 

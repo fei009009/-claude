@@ -83,7 +83,11 @@ def _public_diag(data: Dict[str, Any]) -> Dict[str, Any]:
         "diagnosis_quality",
         "best_rule",
     ]
-    return {key: deepcopy(data.get(key)) for key in keep if key in data}
+    public = {key: deepcopy(data.get(key)) for key in keep if key in data}
+    rich_report = (data.get("extra") or {}).get("rich_report")
+    if rich_report:
+        public["rich_report"] = deepcopy(rich_report)
+    return public
 
 
 def _badge(data: Dict[str, Any]) -> str:
@@ -95,7 +99,15 @@ def _badge(data: Dict[str, Any]) -> str:
 
 def _compact(data: Dict[str, Any]) -> str:
     signal = SIGNAL_TEXT.get(str(data.get("signal") or ""), str(data.get("signal") or "-"))
+    extra = data.get("extra") or {}
+    events = extra.get("event_probabilities") or {}
+    pattern = (extra.get("pattern") or {}).get("label", "")
     parts = [f"{signal} 综合{_pct(data.get('blended_score'))}"]
+    if pattern:
+        parts.append(str(pattern))
+    if events:
+        parts.append(f"冲高{_pct(events.get('high5'))}")
+        parts.append(f"次日{_pct(events.get('next5'))}")
     model = data.get("model_score")
     rule = data.get("rule_score")
     if model not in (None, ""):

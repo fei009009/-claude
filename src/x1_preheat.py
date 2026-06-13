@@ -198,7 +198,10 @@ def run_preheat(
         base_manifest["error"] = f"X1Beam environment missing: {x1_dir}"
         write_manifest(cfg, base_manifest)
         return base_manifest
-    adapter._ensure_summary_files(overwrite=False)
+    adapter._ensure_summary_files(
+        reference_dir=Path(str((cfg.get("paths") or {}).get("reference_x1_dir") or "")),
+        overwrite=False,
+    )
 
     trade_date = str(sig.get("trade_date") or datetime.now().strftime("%Y-%m-%d")).replace("-", "")
     out_path = cache_dir(cfg) / f"x1beam_fast_{trade_date}_{datetime.now():%Y%m%d_%H%M%S}_preheat.json"
