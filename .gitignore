@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+env/
+
+# Secrets
+config/.env
+config/.env.*
+**/.env
+**/.env.*
+*.key
+*.pem
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Outputs & cache
+outputs/
+*.log
+*.tmp
+
+# System
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Large model files
+*.h5
+*.model
+*.joblib
+
+# Vendor mirrors
+vendor/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Windows EXE/MSI
+*.exe
+*.msi

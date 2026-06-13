@@ -1,0 +1,88 @@
+project:
+  name: fenCangZhiShenV2
+  display_name: 分仓之神 V2.0
+  timezone: Asia/Shanghai
+
+paths:
+  # V2.0 only writes under this project. External projects remain read-only references.
+  project_root: D:\ZTFHQ\分仓之神V2.0
+  output_root: D:\ZTFHQ\分仓之神V2.0\outputs
+  snapshot_root: D:\ZTFHQ\分仓之神\outputs\cache\tail_work_snapshots\work
+  v1_snapshot: D:\ZTFHQ\分仓之神\snapshots
+  v1_work: D:\ZTFHQ\分仓之神\outputs\cache\tail_work_snapshots\work
+
+  # Local V2.0 mirrors used at runtime.
+  vip_screener_dir: D:\ZTFHQ\分仓之神V2.0\vendor\VIP
+  legacy_screener_dir: D:\ZTFHQ\分仓之神V2.0\vendor\legacy_screeners
+  x1_xin_dir: D:\ZTFHQ\分仓之神V2.0\vendor\x1_beam
+  xgb_dir: D:\ZTFHQ\分仓之神V2.0\vendor\xgb_diagnosis
+  xgbzx_dir: D:\ZTFHQ\XGBZX
+  xgb_report_dir: D:\ZTFHQ\分仓之神V2.0\outputs\reports\xgb_diagnosis
+
+  # Read-only upstream references, never mutated by V2.0.
+  reference_fczs_v1_dir: D:\ZTFHQ\分仓之神
+  reference_xgb_dir: D:\ZTFHQ\XGB
+  reference_xgbzx_dir: D:\ZTFHQ\XGBZX
+  reference_x1_dir: D:\ZTFHQ\X1
+  reference_x1_xin_dir: D:\ZTFHQ\X1-XIN
+
+strategies:
+  v10:
+    timeout_seconds: 120
+    top_n: 10
+  v1:
+    timeout_seconds: 120
+    top_n: 10
+  v4:
+    timeout_seconds: 120
+    top_n: 10
+  x1beam:
+    timeout_seconds: 45
+    workers: 1
+    fast_mode: true
+    allow_stale_cache_on_timeout: false
+    require_preheated_cache: true
+    cache_role: preheated_equal_strategy
+    top_n: 10
+    preheat:
+      enabled: true
+      freeze_snapshot: true
+      use_frozen_snapshot_for_tail: true
+      start_time: "14:20:00"
+      deadline_time: "14:47:00"
+      max_age_minutes: 90
+      workers: 4
+      timeout_seconds: 7200
+      keep_per_tier: 80
+
+diagnosis:
+  enabled: true
+  role: validation_layer
+  xgb_model_blend_weight: 0.72
+  rule_blend_weight: 0.28
+  report_top_n: 30
+  independent_strategy: false
+
+automation:
+  tail:
+    start_time: "14:50:00"
+    end_time: "14:57:00"
+    interval_seconds: 60
+    max_pushes: 3
+    push_policy: each_success_and_final
+    min_strategy_success: 2
+    quality:
+      min_snapshot_files: 2000
+      max_empty_ratio: 0.05
+      require_today_trade_date: true
+      max_consecutive_failures: 3
+      max_prev_gap_days: 4
+      max_stale_ratio: 0.02
+      max_discontinuous_ratio: 0.02
+      max_zero_close_rows: 0
+
+push:
+  enabled: true
+  request_timeout_seconds: 5
+  retry_attempts: 2
+  markdown_max_chars: 3500
