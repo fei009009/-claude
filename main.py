@@ -25,7 +25,7 @@ from src.tail_readiness import build_push_markdown as build_readiness_md
 from src.tracking_outcomes import outcome_report, update_outcomes
 from src.tracking_store import ingest_pipeline_file, ingest_pipelines, summarize_tracking
 from src.wecom_push import build_run_markdown, push_test_markdown, push_wecom
-from src.x1_preheat import latest_status as x1_preheat_status
+from src.x1_preheat import latest_status as x1_preheat_status, select_tail_snapshot
 
 
 STRATEGY_PRECHECKS = [
@@ -119,11 +119,16 @@ def _print_strategy_summary(results: list[dict], summary: dict, overlap: dict) -
 def cmd_run(args: argparse.Namespace) -> int:
     cfg = load_settings()
     ensure_output_dirs(cfg)
-    snapshot_dir = Path(args.snapshot) if args.snapshot else resolve_snapshot(cfg)[0]
+    if args.snapshot:
+        snapshot_dir = Path(args.snapshot)
+        snapshot_source = "arg"
+    else:
+        active_snapshot, _active_source = resolve_snapshot(cfg)
+        snapshot_dir, snapshot_source, _preheat_status = select_tail_snapshot(cfg, active_snapshot)
     quality = audit_snapshot(snapshot_dir, cfg, official=not args.force)
     x1_status = x1_preheat_status(cfg, snapshot_dir)
 
-    print(f"快照: {snapshot_dir}")
+    print(f"快照: {snapshot_dir} ({snapshot_source})")
     print(f"质量: {format_quality_summary(quality)}")
     for blocker in quality.get("blockers", []):
         print(f"  阻断: {blocker}")

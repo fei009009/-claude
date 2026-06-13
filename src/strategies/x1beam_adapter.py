@@ -194,7 +194,14 @@ class X1BeamAdapter(StrategyAdapter):
             "file_count": sig.get("file_count"),
             "max_mtime": sig.get("max_mtime"),
         }
-        if self._cache_matches(meta, cache_meta):
+        source_sig = manifest.get("source_signature") or {}
+        source_meta = {
+            "snapshot_dir": source_sig.get("snapshot_dir"),
+            "trade_date": source_sig.get("trade_date"),
+            "file_count": source_sig.get("file_count"),
+            "max_mtime": source_sig.get("max_mtime"),
+        }
+        if self._cache_matches(meta, cache_meta) or self._cache_matches(source_meta, cache_meta):
             return cache_path
         return None
 

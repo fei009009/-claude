@@ -65,7 +65,7 @@ function x1PreheatReason(xp){return xp.error||xp.reason||xp.message||''}
 function fmtPct(v){if(v===null||v===undefined||v==='')return '-';const n=Number(v);return Number.isFinite(n)?(n>0?'+':'')+n.toFixed(2)+'%':esc(v)}
 function confidence(n,xgb){if(n>=4)return '<span class="tag t-fail">★★★★ 极高</span>';if(n>=3&&xgb)return '<span class="tag t-fail">★★★★ 极高</span>';if(n>=3)return '<span class="tag t-warn">★★★ 高</span>';if(n>=2&&xgb)return '<span class="tag t-blue">★★ 中</span>';return '<span class="tag">观察</span>'}
 function sigClass(s){return s==='STRONG_BUY'?'t-fail':(s==='BUY'?'t-warn':(s==='WATCH'?'t-blue':'t-purple'))}
-function diagText(x){if(!x)return '';return x.diagnosis_compact||x.diagnosis_badge||((x.diagnosis||{}).compact)||''}
+function diagText(x){if(!x)return '';const d=x.diagnosis||{};const rr=d.rich_report||((d.extra||{}).rich_report)||{};return x.diagnosis_compact||x.diagnosis_badge||d.compact||rr.headline||rr.final_view||''}
 function diagBadge(x){const text=diagText(x);return text?`<span class="diag">${esc(text)}</span>`:''}
 async function refreshAll(){try{state=await api('/status');renderStatus(state);const j=await api('/job');renderJob(j)}catch(e){notice('刷新失败: '+e,false)}}
 function renderStatus(d){
@@ -78,16 +78,41 @@ function renderStatus(d){
   let q=`<div>目录：<span class="mono">${esc(s.dir||'')}</span></div><div>空文件：${s.empty_files||0}，断档：${s.discontinuous_count||0}，零价：${s.zero_close_count||0}</div>`;
   const x1Reason=x1PreheatReason(xp);
   q+=`<div>X1预热：${xp.usable?'<span class="ok">可作为第四策略</span>':'<span class="warnc">未匹配完整缓存</span>'}，Top=${xp.top_count||0}，${esc(xp.trade_date||'-')}${x1Reason?'，'+esc(x1Reason):''}</div>`;
+  const xq=xp.summary_quality||{};const xc=xq.counts||{};if(Object.keys(xc).length)q+=`<div>X1规则池：${xq.complete?'<span class="ok">完整</span>':'<span class="warnc">待补齐</span>'}；close5=${xc.y_close_5d_5pct_merged_json||xc['y_close_5d_5pct_merged.json']||0}，noloss=${xc.y_close_5d_0pct_merged_json||xc['y_close_5d_0pct_merged.json']||0}，high5=${xc.y_high_5d_5pct_merged_json||xc['y_high_5d_5pct_merged.json']||0}，next=${xc.y_next_5pct_merged_json||xc['y_next_5pct_merged.json']||0}</div>`;
   (s.blockers||[]).forEach(x=>q+=`<div class="bad">阻断：${esc(x)}</div>`);(s.warnings||[]).forEach(x=>q+=`<div class="warnc">提醒：${esc(x)}</div>`);$('qualityBox').innerHTML=q;
   const r=d.latest_run;if(!r){$('st').textContent='-';$('ol').textContent='-';$('xg').textContent='-';$('el').textContent='-';$('strategyRows').innerHTML='<tr><td colspan="6" class="empty">暂无运行结果</td></tr>';renderTracking(d.tracking||{});return}
   const rxp=r.x1_preheat||xp;$('x1p').innerHTML=rxp.usable?'<span class="ok">可用</span>':'<span class="warnc">待预热</span>';
   $('latestFile').textContent=(r.file||'')+' | '+(r.timestamp||'').replace('T',' ');$('st').textContent=(r.strategies_ok||0)+'/'+(r.strategies_run||0);$('ol').textContent=r.overlap_candidates||0;$('el').textContent=Number(r.elapsed||0).toFixed(1)+'s';
-  const x=r.xgb_diagnosis||{};const sd=x.signal_distribution||{};$('xg').textContent=(sd.STRONG_BUY||0)+'强/'+(sd.BUY||0)+'买';
+  const x=r.xgb_diagnosis||{};const sd=x.signal_distribution||{};$('xg').textContent=(sd.STRONG_BUY||0)+'强/'+(sd.BUY||0)+'买/'+(sd.WATCH||0)+'观';
   renderStrategies(r.strategies||[]);renderOverlaps(r.overlaps||[]);renderXgb(x);renderTracking(d.tracking||{});renderBoundary(d.boundary||{});renderCards(r.strategies||[])
 }
 function renderStrategies(rows){let html='';rows.forEach(s=>{const picks=(s.top||[]).map(p=>`<span class="chip"><b>${esc(p.code)}</b> ${esc(p.name)} <span class="rank">#${p.rank}</span>${diagBadge(p)}</span>`).join('');const errCls=(s.status_kind==='warn')?'warnc':'bad';html+=`<tr><td><b>${esc(s.name)}</b></td><td>${statusTag(s)}</td><td>${s.count}</td><td>${Number(s.elapsed||0).toFixed(1)}s</td><td><div class="chips">${picks||'-'}</div></td><td class="${errCls} wrap">${esc(strategyErrorText(s))}</td></tr>`});$('strategyRows').innerHTML=html||'<tr><td colspan="6" class="empty">暂无策略结果</td></tr>'}
 function renderOverlaps(rows){let html='';rows.forEach(o=>{const rk=o.ranks||{};html+=`<tr><td><b>${esc(o.code)}</b></td><td>${esc(o.name)}</td><td>${o.strategy_count}</td><td>${esc((o.strategies||[]).join('+'))}</td><td>${rk.v10||'-'}</td><td>${rk.v1||'-'}</td><td>${rk.v4||'-'}</td><td>${rk.x1beam||'-'}</td><td>${confidence(o.strategy_count||0,o.xgb_confirmed)}</td><td class="wrap">${diagText(o)?esc(diagText(o)):'-'}</td></tr>`});$('overlapRows').innerHTML=html||'<tr><td colspan="10" class="empty">暂无交集</td></tr>'}
-function renderXgb(x){if(!x){$('xgbBox').innerHTML='<div class="empty">未运行诊断</div>';return}const sd=x.signal_distribution||{};let html=`<div class="item">定位：验证层，不参与交集计数</div><div class="item">总数：${x.total||0}；STRONG_BUY ${sd.STRONG_BUY||0}；BUY ${sd.BUY||0}；WATCH ${sd.WATCH||0}</div>`;if(x.error)html+=`<div class="item bad">${esc(x.error)}</div>`;(x.top_picks||[]).slice(0,10).forEach(p=>{html+=`<div class="item"><span class="tag ${sigClass(p.signal)}">${esc(p.signal)}</span> <b>${esc(p.code)}</b> ${esc(p.name||'')} <span class="sub">${Number((p.blended_score??p.score??0)*100).toFixed(1)}%</span><div class="sub wrap">${esc(p.recommendation||'')}</div></div>`});if(x.report_path)html+=`<div class="item sub mono wrap">${esc(x.report_path)}</div>`;$('xgbBox').innerHTML=html}
+function eventPct(v){const n=Number(v||0);return Number.isFinite(n)?(n*100).toFixed(1)+'%':'-'}
+function richOf(p){return (p.extra||{}).rich_report||(p.rich_report)||(((p.diagnosis||{}).extra||{}).rich_report)||((p.diagnosis||{}).rich_report)||{}}
+function eventsOf(p){return (p.extra||{}).event_probabilities||(((p.diagnosis||{}).extra||{}).event_probabilities)||{}}
+function renderXgb(x){
+  if(!x){$('xgbBox').innerHTML='<div class="empty">未运行诊断</div>';return}
+  const sd=x.signal_distribution||{};
+  let html=`<div class="item">定位：验证层，不参与交集计数${x.engine?'；引擎：'+esc(x.engine):''}</div><div class="item">总数：${x.total||0}；STRONG_BUY ${sd.STRONG_BUY||0}；BUY ${sd.BUY||0}；WATCH ${sd.WATCH||0}；NEUTRAL ${sd.NEUTRAL||0}</div>`;
+  if(x.error)html+=`<div class="item bad">${esc(x.error)}</div>`;
+  if(x.summary)html+=`<div class="item sub wrap">${esc(x.summary)}</div>`;
+  const merged=[];const seen=new Set();
+  [...(x.top_picks||[]),...(x.watch_list||[]),...(x.results||[])].forEach(p=>{const c=p.code||'';if(!c||seen.has(c))return;seen.add(c);merged.push(p)});
+  merged.slice(0,12).forEach(p=>{
+    const rr=richOf(p);const ev=eventsOf(p);const score=Number((p.blended_score??p.score??0)*100).toFixed(1);
+    const headline=p.headline||rr.headline||p.recommendation||'';
+    const line1=p.probability_text||rr.probability_text||`冲高5% ${eventPct(ev.high5)}，收盘5% ${eventPct(ev.close5)}，次日强度 ${eventPct(ev.next5)}`;
+    const line2=p.pattern_text||rr.pattern_text||p.pattern||((p.extra||{}).pattern||{}).label||'';
+    const veto=(p.veto_text||rr.veto_text)?`否决：${p.veto_text||rr.veto_text}`:'';
+    const final=p.final_view||rr.final_view||'';
+    const report=p.markdown_report||rr.markdown||p.report_path||'';
+    html+=`<div class="item"><span class="tag ${sigClass(p.signal)}">${esc(p.signal||'-')}</span> <b>${esc(p.code)}</b> ${esc(p.name||'')} <span class="sub">${score}%</span><div class="sub wrap">${esc(headline)}</div><div class="sub wrap">${esc(line1)}</div>${line2?`<div class="sub wrap">模式：${esc(line2)}</div>`:''}${veto?`<div class="sub wrap">${esc(veto)}</div>`:''}${final?`<div class="wrap">${esc(final)}</div>`:''}${report?`<div class="sub mono wrap">${esc(report)}</div>`:''}</div>`;
+  });
+  if(!merged.length)html+='<div class="empty">本次没有可展示的个股诊断明细</div>';
+  if(x.report_path)html+=`<div class="item sub mono wrap">批量报告：${esc(x.report_path)}</div>`;
+  $('xgbBox').innerHTML=html
+}
 function renderTracking(t){if(!t||t.error){$('trackingBox').innerHTML=`<div class="warnc">追踪摘要暂不可用：${esc((t||{}).error||'暂无数据')}</div>`;return}const f=t.latest_factor_panel||{};const os=((t.outcomes||{}).summary)||{};const oo=os.overall||{};let html=`<div>追踪库：${t.record_count||0} 条，${t.unique_code_count||0} 只股票，覆盖 pipeline ${t.unique_pipeline_count||0} 个</div>`;html+=`<div>层级：${esc(JSON.stringify(t.by_selection_layer||{}))}；策略数：${esc(JSON.stringify(t.by_strategy_count||{}))}；诊断：${esc(JSON.stringify(t.by_diagnosis_signal||{}))}</div>`;html+=`<div>收益追踪：可追踪 ${os.tracked_count||0}，完整5日 ${os.completed_count||0}，等待 ${os.pending_count||0}；次日冲高盈利率 ${(Number(oo.next_high_profit_rate||0)*100).toFixed(1)}%，5日5%达标率 ${(Number(oo.five_day_5pct_hit_rate||0)*100).toFixed(1)}%</div>`;html+=`<div>最新宽表：<span class="mono">${esc(f.file||'未生成')}</span>，行数 ${f.row_count||0}，更新时间 ${esc((f.mtime||'').replace('T',' '))}</div>`;const top=f.top||[];if(top.length){html+='<div class="chips">';top.forEach(x=>{const notes=Array.isArray(x.factor_notes)?x.factor_notes.join('，'):String(x.factor_notes||'');html+=`<span class="chip"><b>${esc(x.code)}</b> ${esc(x.name)} <span class="rank">${esc(x.selection_layer)} / ${x.strategy_count||0}策 / ${Number(x.preliminary_score||0).toFixed(3)}</span><span class="diag">${esc(x.diagnosis_badge||notes||'-')}</span></span>`});html+='</div>'}$('trackingBox').innerHTML=html}
 function renderBoundary(b){let html='';((b.risks||[])).forEach(x=>{const rk=Object.entries(x.strategy_ranks||{}).map(([k,v])=>k.toUpperCase()+'#'+v).join(' ');html+=`<tr class="risk-row"><td><b>${esc(x.code)}</b></td><td>${esc(x.name||'')}</td><td>${Number(x.pct||0).toFixed(2)}%</td><td>${x.in_any_top?tag(true):tag(false,true)}</td><td class="wrap">${esc((x.risk_reasons||[]).join(','))}</td><td>${esc(rk||'-')}</td></tr>`});$('boundaryRows').innerHTML=html||'<tr><td colspan="6" class="empty">暂无边界风险</td></tr>'}
 function renderCards(rows){let html='';rows.forEach(s=>{html+=`<section class="panel span-3"><h2>${esc(s.name)}</h2><table><thead><tr><th>#</th><th>代码</th><th>名称</th><th>诊断</th></tr></thead><tbody>`;(s.top||[]).slice(0,10).forEach(p=>{html+=`<tr><td>${p.rank}</td><td><b>${esc(p.code)}</b></td><td>${esc(p.name)}</td><td class="wrap">${diagText(p)?esc(diagText(p)):'-'}</td></tr>`});html+='</tbody></table></section>'});$('detailCards').innerHTML=html||'<div class="empty">暂无明细</div>'}

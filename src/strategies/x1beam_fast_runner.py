@@ -21,6 +21,7 @@ import numpy as np
 
 _IND_MOD = None
 _FORMULAS: Dict[str, List[Dict[str, Any]]] = {}
+_FORMULA_INDEX: Dict[str, Dict[tuple[str, int], List[Dict[str, Any]]]] = {}
 _CFG: Dict[str, Any] = {}
 
 
@@ -96,8 +97,9 @@ def _read_kline_raw(path: Path) -> Optional[Dict[str, np.ndarray]]:
 
 
 def _init_worker(indicator_path: str, formulas: Dict[str, List[Dict[str, Any]]], cfg: Dict[str, Any]) -> None:
-    global _IND_MOD, _FORMULAS, _CFG
+    global _IND_MOD, _FORMULAS, _FORMULA_INDEX, _CFG
     _FORMULAS = formulas
+    _FORMULA_INDEX = _build_formula_index(formulas)
     _CFG = cfg
     spec = importlib.util.spec_from_file_location("x1_indicator", indicator_path)
     if not spec or not spec.loader:
@@ -105,6 +107,43 @@ def _init_worker(indicator_path: str, formulas: Dict[str, List[Dict[str, Any]]],
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     _IND_MOD = mod
+
+
+def _build_formula_index(formulas_by_tier: Dict[str, List[Dict[str, Any]]]) -> Dict[str, Dict[tuple[str, int], List[Dict[str, Any]]]]:
+    """Index each formula by its rarest condition inside the tier.
+
+    A stock that matches a formula must match that pivot condition, so lookup can
+    start from a small candidate bucket instead of scanning every mined rule.
+    """
+    indexed: Dict[str, Dict[tuple[str, int], List[Dict[str, Any]]]] = {}
+    for tier, formulas in formulas_by_tier.items():
+        frequencies: Dict[tuple[str, int], int] = {}
+        for formula in formulas:
+            for name, value in (formula.get("path") or {}).items():
+                key = (str(name), int(value))
+                frequencies[key] = frequencies.get(key, 0) + 1
+        tier_index: Dict[tuple[str, int], List[Dict[str, Any]]] = {}
+        for formula in formulas:
+            path = formula.get("path") or {}
+            if not path:
+                continue
+            pivot = min(
+                ((str(name), int(value)) for name, value in path.items()),
+                key=lambda key: (frequencies.get(key, 10**9), key[0], key[1]),
+            )
+            tier_index.setdefault(pivot, []).append(formula)
+        indexed[tier] = tier_index
+    return indexed
+
+
+def _candidate_formulas(tier: str, binned: Dict[str, int], fallback: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    index = _FORMULA_INDEX.get(tier) or {}
+    if not index:
+        return fallback
+    candidates: List[Dict[str, Any]] = []
+    for name, value in binned.items():
+        candidates.extend(index.get((str(name), int(value)), []))
+    return candidates
 
 
 def _process_stock(path_text: str) -> Optional[Dict[str, Any]]:
@@ -144,7 +183,7 @@ def _process_stock(path_text: str) -> Optional[Dict[str, Any]]:
         tier_hits: List[Dict[str, Any]] = []
         for tier, formulas in _FORMULAS.items():
             hits = []
-            for idx, formula in enumerate(formulas):
+            for idx, formula in enumerate(_candidate_formulas(tier, binned, formulas)):
                 path_dict = formula.get("path") or {}
                 if all(binned.get(k) == v for k, v in path_dict.items()):
                     hits.append((idx, formula))

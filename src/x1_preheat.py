@@ -96,9 +96,18 @@ def latest_status(cfg: Dict[str, Any], snapshot_dir: Optional[Path] = None) -> D
     current_sig = snapshot_signature(snapshot_dir) if snapshot_dir else None
     manifest = load_manifest(cfg)
     completed = bool(manifest.get("completed"))
-    cache_path = Path(str(manifest.get("cache_path") or ""))
+    cache_text = str(manifest.get("cache_path") or "").strip()
+    cache_path = Path(cache_text) if cache_text else None
     cache_exists = bool(cache_path and cache_path.exists())
-    matches_current = bool(current_sig and signatures_match(manifest.get("snapshot_signature") or {}, current_sig))
+    snapshot_sig = manifest.get("snapshot_signature") or {}
+    source_sig = manifest.get("source_signature") or {}
+    matches_current = bool(
+        current_sig
+        and (
+            signatures_match(snapshot_sig, current_sig)
+            or signatures_match(source_sig, current_sig)
+        )
+    )
     usable = completed and cache_exists and (matches_current if current_sig else True)
 
     age_minutes = None
@@ -108,6 +117,12 @@ def latest_status(cfg: Dict[str, Any], snapshot_dir: Optional[Path] = None) -> D
             age_minutes = round((datetime.now() - datetime.fromisoformat(generated_at)).total_seconds() / 60, 1)
         except Exception:
             age_minutes = None
+    summary_quality: Dict[str, Any] = {}
+    try:
+        x1_dir = Path(str((cfg.get("paths") or {}).get("x1_xin_dir", "")))
+        summary_quality = X1BeamAdapter(x1_dir)._summary_quality(x1_dir / "cache" / "_summary")
+    except Exception:
+        summary_quality = {}
 
     return {
         "exists": bool(manifest.get("exists")),
@@ -127,6 +142,8 @@ def latest_status(cfg: Dict[str, Any], snapshot_dir: Optional[Path] = None) -> D
         "age_minutes": age_minutes,
         "mode": manifest.get("mode", ""),
         "error": manifest.get("error", ""),
+        "summary_quality": summary_quality,
+        "source_signature": manifest.get("source_signature") or {},
         "current_snapshot_signature": current_sig,
     }
 
@@ -139,6 +156,13 @@ def select_tail_snapshot(cfg: Dict[str, Any], default_snapshot: Path) -> Tuple[P
     status = latest_status(cfg)
     if not status.get("usable"):
         return default_snapshot, "active_snapshot_no_x1_preheat", latest_status(cfg, default_snapshot)
+
+    current_sig = snapshot_signature(default_snapshot)
+    source_sig = status.get("source_signature") or {}
+    if source_sig and not signatures_match(source_sig, current_sig):
+        return default_snapshot, "active_snapshot_x1_preheat_source_mismatch", latest_status(cfg, default_snapshot)
+    if not source_sig and status.get("trade_date") and status.get("trade_date") != current_sig.get("trade_date"):
+        return default_snapshot, "active_snapshot_x1_preheat_trade_date_mismatch", latest_status(cfg, default_snapshot)
 
     frozen_dir = Path(str(status.get("snapshot_dir") or ""))
     if not frozen_dir.exists():
@@ -166,6 +190,7 @@ def run_preheat(
 ) -> Dict[str, Any]:
     started = time.perf_counter()
     source_snapshot, source_label = (Path(snapshot), "arg") if snapshot else resolve_snapshot(cfg)
+    source_sig = snapshot_signature(source_snapshot)
     quality = audit_snapshot(source_snapshot, cfg, official=not force)
     preheat_cfg = (cfg.get("strategies") or {}).get("x1beam", {}).get("preheat", {})
     freeze_snapshot = bool(preheat_cfg.get("freeze_snapshot", True) if freeze is None else freeze)
@@ -175,6 +200,7 @@ def run_preheat(
         "mode": "x1beam_preheat",
         "source_snapshot_dir": str(source_snapshot),
         "source_snapshot_label": source_label,
+        "source_signature": source_sig,
         "quality": quality,
         "quality_summary": format_quality_summary(quality),
         "completed": False,

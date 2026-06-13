@@ -178,6 +178,38 @@ def _display_stock_name(code: Any, name: Any, name_map: Dict[str, str]) -> str:
 def _clean_diagnosis_item(item: Dict[str, Any], name_map: Dict[str, str]) -> Dict[str, Any]:
     cleaned = dict(item)
     cleaned["name"] = _display_stock_name(cleaned.get("code"), cleaned.get("name", ""), name_map)
+    extra = cleaned.get("extra") if isinstance(cleaned.get("extra"), dict) else {}
+    rich_report = cleaned.get("rich_report") or extra.get("rich_report")
+    if isinstance(rich_report, dict) and rich_report:
+        cleaned["rich_report"] = rich_report
+        cleaned.setdefault("headline", rich_report.get("headline", ""))
+        cleaned.setdefault("probability_text", rich_report.get("probability_text", ""))
+        cleaned.setdefault("pattern_text", rich_report.get("pattern_text", ""))
+        cleaned.setdefault("veto_text", rich_report.get("veto_text", ""))
+        cleaned.setdefault("final_view", rich_report.get("final_view", ""))
+        cleaned.setdefault("markdown_report", rich_report.get("markdown", ""))
+        cleaned.setdefault("report_path", rich_report.get("markdown") or rich_report.get("json") or "")
+        cleaned.setdefault("diagnosis_compact", rich_report.get("headline") or rich_report.get("final_view") or "")
+    events = extra.get("event_probabilities")
+    if isinstance(events, dict) and events:
+        cleaned.setdefault("event_probabilities", events)
+    pattern = extra.get("pattern")
+    if isinstance(pattern, dict) and pattern:
+        cleaned.setdefault("pattern", pattern.get("label", ""))
+    if not cleaned.get("diagnosis_badge") and cleaned.get("signal"):
+        labels = {
+            "STRONG_BUY": "强确认",
+            "BUY": "确认",
+            "WATCH": "观察",
+            "NEUTRAL": "中性",
+            "SKIP": "跳过",
+        }
+        label = labels.get(str(cleaned.get("signal")), str(cleaned.get("signal")))
+        try:
+            score = f"{float(cleaned.get('blended_score')):.0%}"
+        except Exception:
+            score = ""
+        cleaned["diagnosis_badge"] = f"XGB{label}{score}"
     return cleaned
 
 
@@ -356,14 +388,17 @@ def _diagnosis_summary(pipeline: Dict[str, Any], name_map: Dict[str, str]) -> Op
     return {
         "enabled": diag.get("enabled", True),
         "role": diag.get("role", "validation_layer"),
+        "engine": diag.get("engine", ""),
         "independent_strategy": bool(diag.get("independent_strategy", False)),
         "total": diag.get("total", len(raw_results)),
         "signal_distribution": signals,
+        "results": raw_results[:30],
         "top_picks": top_picks,
         "watch_list": watch_list,
         "report_path": diag.get("report_path", ""),
         "summary": summary_text,
         "error": diag.get("error", ""),
+        "sidecar": diag.get("sidecar", {}),
     }
 
 
