@@ -42,6 +42,38 @@ def safe_int(value: Any, default: int = 0) -> int:
         return default
 
 
+_MOJIBAKE_MARKERS = ("鑺", "鍏", "娴", "榫", "鐢", "绉", "灞", "闀", "閫", "锛", "涓", "唤", "濂")
+
+
+def repair_mojibake(value: Any) -> str:
+    """Repair common UTF-8-as-GBK mojibake seen in stock names.
+
+    Some legacy screeners or subprocess stdout paths may decode UTF-8 stock
+    names as GBK before writing UTF-8 JSON/CSV. The transformed text is still
+    reversible in many cases, e.g. "鑺卞洯鐢熺墿" -> "花园生物".
+    """
+    text = str(value or "")
+    if not text:
+        return ""
+    if not any(marker in text for marker in _MOJIBAKE_MARKERS):
+        return text
+    candidates = [text]
+    for source_encoding in ("gb18030", "gbk"):
+        try:
+            repaired = text.encode(source_encoding, errors="strict").decode("utf-8", errors="strict")
+            candidates.append(repaired)
+        except Exception:
+            continue
+    return min(candidates, key=_mojibake_score)
+
+
+def _mojibake_score(text: str) -> int:
+    score = sum(text.count(marker) for marker in _MOJIBAKE_MARKERS) * 5
+    score += sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff" and ch in _MOJIBAKE_MARKERS)
+    score -= sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
+    return score
+
+
 def pick(row: Dict[str, Any], names: Iterable[str], default: Any = "") -> Any:
     lower = {str(key).strip().lower(): key for key in row.keys()}
     for name in names:

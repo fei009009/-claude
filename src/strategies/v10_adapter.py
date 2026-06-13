@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List
 
-from src.common import latest_file, norm_code, pick, read_csv_rows, safe_float, safe_int
+from src.common import latest_file, norm_code, pick, read_csv_rows, repair_mojibake, safe_float, safe_int
 from src.strategies.base import StrategyAdapter, StrategyResult
 
 
@@ -63,7 +63,7 @@ class V10Adapter(StrategyAdapter):
                     {
                         "rank": len(top_rows) + 1,
                         "code": code,
-                        "name": str(pick(row, ["Name", "name", "名称"])).strip(),
+                        "name": repair_mojibake(pick(row, ["Name", "name", "名称"])).strip(),
                         "price": round(safe_float(pick(row, ["Price", "price", "现价", "价格"])), 2),
                         "pct_chg": round(safe_float(pick(row, ["Return%", "pct_chg", "涨幅%", "涨幅"])), 2),
                         "positive_count": safe_int(pick(row, ["PosCount", "positive_count", "正匹配数"])),

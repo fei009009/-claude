@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
-from src.common import norm_code, safe_float, safe_int
+from src.common import norm_code, repair_mojibake, safe_float, safe_int
 
 STRATEGY_KEYS = ("v10", "v1", "v4", "x1beam")
 
@@ -189,7 +189,7 @@ def _make_record(
         "selection_layer": selection_layer,
         "selection_rank": selection_rank,
         "code": code,
-        "name": name,
+        "name": repair_mojibake(name),
         "strategy_sources": strategy_list,
         "strategy_count": len(strategy_list),
         "v10_rank": rank_map.get("v10", 0),

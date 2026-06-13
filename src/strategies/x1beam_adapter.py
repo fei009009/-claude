@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from src.common import norm_code, output_root
+from src.common import norm_code, output_root, repair_mojibake
 from src.strategies.base import StrategyAdapter, StrategyResult
 
 
@@ -149,7 +149,7 @@ class X1BeamAdapter(StrategyAdapter):
                 {
                     "rank": len(rows) + 1,
                     "code": code,
-                    "name": str(item.get("name", "") or ""),
+                    "name": repair_mojibake(item.get("name", "")),
                     "price": float(item.get("close", 0) or 0),
                     "pct_chg": float(item.get("daily_gain_pct", 0) or 0),
                     "wr": float(item.get("top_wr", 0) or 0),

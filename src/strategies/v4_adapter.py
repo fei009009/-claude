@@ -3,7 +3,7 @@ from __future__ import annotations
 import importlib.util, io, sys, time
 from pathlib import Path
 from typing import Any, Dict, List
-from src.common import norm_code, output_root
+from src.common import norm_code, output_root, repair_mojibake
 from src.strategies.base import StrategyAdapter, StrategyResult
 
 class _NoInput(io.StringIO):
@@ -48,7 +48,7 @@ class V4Adapter(StrategyAdapter):
                 code = str(item.get("code", "")).replace(".txt","").strip()
                 tag = "候补" if item.get("is_backup") else ("涨停" if item.get("is_limit") else "")
                 top.append({
-                    "rank": i, "code": norm_code(code), "name": meta.get("name",""),
+                    "rank": i, "code": norm_code(code), "name": repair_mojibake(meta.get("name","")),
                     "price": round(float(meta.get("price",0) or 0), 2),
                     "pct_chg": round(float(meta.get("pct_chg",0) or 0), 2),
                     "match_count": item.get("total_match",0),

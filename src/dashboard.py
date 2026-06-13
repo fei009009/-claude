@@ -70,6 +70,8 @@ def _load_latest_pipeline() -> Optional[Dict[str, Any]]:
 
 
 def _latest_factor_panel() -> Dict[str, Any]:
+    from src.common import repair_mojibake
+
     factor_dir = ROOT / "outputs" / "factors"
     files = sorted(factor_dir.glob("candidate_factor_panel_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
     if not files:
@@ -85,7 +87,7 @@ def _latest_factor_panel() -> Dict[str, Any]:
     for row in rows[:10]:
         top.append({
             "code": row.get("code", ""),
-            "name": row.get("name", ""),
+            "name": repair_mojibake(row.get("name", "")),
             "selection_layer": row.get("selection_layer", ""),
             "strategy_count": row.get("strategy_count", 0),
             "preliminary_score": row.get("preliminary_score", 0),
@@ -98,6 +100,29 @@ def _latest_factor_panel() -> Dict[str, Any]:
         "row_count": data.get("row_count", len(rows)),
         "top": top,
     }
+
+
+def _strategy_display_state(result: Dict[str, Any]) -> Dict[str, str]:
+    key = str(result.get("strategy_name", "")).lower()
+    error = str(result.get("error") or "")
+    metadata = result.get("metadata") or {}
+    cache_mode = str(metadata.get("cache_mode") or "")
+    if result.get("ok"):
+        return {"kind": "ok", "label": "OK"}
+    if key == "x1beam" and (
+        "no complete preheated cache" in error
+        or "missing_preheated_cache" in cache_mode
+        or "incomplete cache" in error
+    ):
+        return {"kind": "warn", "label": "待预热"}
+    return {"kind": "fail", "label": "FAIL"}
+
+
+def _strategy_display_error(result: Dict[str, Any], state: Dict[str, str]) -> str:
+    key = str(result.get("strategy_name", "")).lower()
+    if key == "x1beam" and state.get("kind") == "warn":
+        return "当前快照没有完整 X1Beam 预热缓存；尾盘前预热完成后，X1Beam 会作为第四个对等策略参与交集。"
+    return str(result.get("error") or "")
 
 
 def _tracking_status(cfg: Dict[str, Any]) -> Dict[str, Any]:
@@ -189,6 +214,7 @@ def _diagnosis_summary(pipeline: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 def _v2_status() -> Dict[str, Any]:
     from src.quality_gate import audit_snapshot, resolve_snapshot
     from src.settings import load_settings
+    from src.common import repair_mojibake
     from src.x1_preheat import latest_status as x1_preheat_status
 
     cfg = load_settings()
@@ -244,18 +270,22 @@ def _v2_status() -> Dict[str, Any]:
     strategies = []
     for result in pipeline.get("strategies", []):
         top = result.get("top", [])
+        display_state = _strategy_display_state(result)
         strategies.append({
             "name": result.get("display_name", result.get("strategy_name", "?")),
             "key": result.get("strategy_name", ""),
             "ok": result.get("ok", False),
+            "status_kind": display_state["kind"],
+            "status_label": display_state["label"],
             "count": len(top),
             "elapsed": result.get("elapsed_seconds", 0),
             "error": result.get("error", ""),
+            "display_error": _strategy_display_error(result, display_state),
             "top": [
                 {
                     "rank": row.get("rank", idx + 1),
                     "code": row.get("code", ""),
-                    "name": row.get("name", ""),
+                    "name": repair_mojibake(row.get("name", "")),
                     "pct_chg": row.get("pct_chg"),
                     "score": row.get("lift_score", row.get("wr", row.get("score"))),
                     "tag": row.get("tag", ""),
@@ -272,7 +302,7 @@ def _v2_status() -> Dict[str, Any]:
     for item in overlap.get("overlaps", [])[:30]:
         overlaps.append({
             "code": item.get("code", ""),
-            "name": item.get("name", ""),
+            "name": repair_mojibake(item.get("name", "")),
             "strategies": item.get("strategies", []),
             "strategy_count": item.get("strategy_count", 0),
             "ranks": item.get("ranks", {}),
@@ -406,6 +436,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
 
@@ -418,6 +449,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
 

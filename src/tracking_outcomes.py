@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from src.backtest_metrics import hit_rate, mean, win_rate
-from src.common import norm_code, safe_float, safe_int
+from src.common import norm_code, repair_mojibake, safe_float, safe_int
 from src.tracking_store import load_tracking_records, tracking_dir
 
 
@@ -132,7 +132,7 @@ def label_record(
         "pipeline_file": record.get("pipeline_file", ""),
         "trade_date": trade_date,
         "code": code,
-        "name": record.get("name", ""),
+        "name": repair_mojibake(record.get("name", "")),
         "selection_layer": record.get("selection_layer", ""),
         "strategy_sources": record.get("strategy_sources", []),
         "strategy_count": safe_int(record.get("strategy_count"), 0),
