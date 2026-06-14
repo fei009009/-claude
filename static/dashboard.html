@@ -2,52 +2,57 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Cache-Control" content="no-store">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>分仓之神 V2.0</title>
 <style>
-:root{--bg:#f5f6f8;--panel:#fff;--line:#d7dde8;--text:#172033;--muted:#667085;--green:#067647;--red:#b42318;--amber:#b54708;--blue:#175cd3;--purple:#6941c6;--shadow:0 1px 2px rgba(16,24,40,.05)}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:"Microsoft YaHei","Segoe UI",Arial,sans-serif;font-size:12px}header{position:sticky;top:0;z-index:20;background:#fff;border-bottom:1px solid var(--line)}
-.top{max-width:1540px;margin:0 auto;padding:10px 16px;display:flex;gap:12px;align-items:center;justify-content:space-between}h1{margin:0;font-size:18px}.sub{color:var(--muted);font-size:11px}.actions{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
-button{height:28px;border:1px solid #b8c2d6;background:#fff;color:var(--text);border-radius:6px;padding:0 9px;font-size:11px;cursor:pointer;white-space:nowrap}button:hover{background:#eef4ff}button.primary{background:var(--blue);border-color:var(--blue);color:#fff}button.warn{background:#fff7ed;border-color:#fed7aa;color:#9a3412}
-main{max-width:1540px;margin:0 auto;padding:12px 16px 32px}.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:10px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow);padding:10px 12px;min-width:0}.span-12{grid-column:span 12}.span-8{grid-column:span 8}.span-6{grid-column:span 6}.span-4{grid-column:span 4}.span-3{grid-column:span 3}
-.panel h2{font-size:13px;margin:0 0 7px}.head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px}.head h2{margin:0}.cards{display:grid;grid-template-columns:repeat(11,minmax(0,1fr));gap:8px}.metric{border:1px solid var(--line);border-radius:7px;background:#fbfcff;padding:7px 8px;min-height:54px}.metric .label{color:var(--muted);font-size:10px}.metric .value{font-size:17px;font-weight:700;margin-top:2px;word-break:break-all}.ok{color:var(--green)}.bad{color:var(--red)}.warnc{color:var(--amber)}
-table{width:100%;border-collapse:collapse;font-size:11px}th,td{border-bottom:1px solid var(--line);padding:4px 5px;text-align:left;white-space:nowrap;vertical-align:top}th{color:var(--muted);font-weight:600;font-size:10px}.scroll{overflow:auto;max-height:330px}.tag{display:inline-block;border-radius:4px;padding:1px 5px;font-size:10px;font-weight:700}.t-ok{background:#ecfdf3;color:var(--green)}.t-fail{background:#fef3f2;color:var(--red)}.t-warn{background:#fff7ed;color:var(--amber)}.t-blue{background:#eef4ff;color:var(--blue)}.t-purple{background:#f4f3ff;color:var(--purple)}.rank{color:var(--muted);font-size:10px}.chips{display:flex;gap:5px;flex-wrap:wrap}.chip{border:1px solid var(--line);border-radius:6px;padding:3px 6px;background:#fff;font-size:10px;max-width:260px}.chip b{font-size:11px}.diag{display:block;color:var(--purple);margin-top:1px;white-space:normal;line-height:1.25}.notice{display:none;margin-bottom:10px;border-radius:7px;padding:8px 10px}.notice.show{display:block}.notice.ok{border:1px solid #abefc6;background:#ecfdf3;color:var(--green)}.notice.bad{border:1px solid #fecdca;background:#fef3f2;color:var(--red)}
-.ctrl{display:flex;gap:7px;align-items:center;flex-wrap:wrap}label{display:inline-flex;align-items:center;gap:3px;color:var(--muted)}input[type=checkbox]{width:13px;height:13px}input[type=number]{height:25px;width:58px;border:1px solid var(--line);border-radius:5px;padding:0 5px}.mono{font-family:Consolas,"Courier New",monospace}.list{display:grid;gap:4px}.item{border-bottom:1px solid #edf0f5;padding:3px 0}.item:last-child{border-bottom:0}.empty{color:var(--muted);padding:8px 0}.quality{display:grid;gap:4px;font-size:11px}.risk-row{background:#fffaf0}.wrap{white-space:normal;line-height:1.3}@media(max-width:1100px){.span-8,.span-6,.span-4,.span-3{grid-column:span 12}.cards{grid-template-columns:repeat(2,minmax(0,1fr))}.top{align-items:flex-start;flex-direction:column}}
+:root{--bg:#f4f6fa;--panel:#fff;--soft:#f8fafc;--line:#d8deea;--text:#172033;--muted:#667085;--green:#067647;--red:#b42318;--amber:#b54708;--blue:#175cd3;--purple:#6941c6;--shadow:0 1px 2px rgba(16,24,40,.06)}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:"Microsoft YaHei","Segoe UI",Arial,sans-serif;font-size:12px;letter-spacing:0}header{position:sticky;top:0;z-index:20;background:#fff;border-bottom:1px solid var(--line);box-shadow:0 1px 2px rgba(16,24,40,.04)}
+.top{max-width:1580px;margin:0 auto;padding:10px 16px;display:grid;grid-template-columns:180px 1fr;gap:12px;align-items:start}.brand h1{margin:0;font-size:18px;line-height:1.15}.brand .sub{margin-top:4px}.sub{color:var(--muted);font-size:11px}.actions{display:grid;gap:6px}.action-row{display:flex;gap:6px;flex-wrap:wrap;align-items:center}.action-group{display:flex;gap:5px;align-items:center;flex-wrap:wrap;padding:5px 6px;border:1px solid #e3e8f2;border-radius:8px;background:#fbfcff}.group-title{font-size:10px;color:var(--muted);font-weight:700;margin-right:2px}
+button{height:28px;border:1px solid #b8c2d6;background:#fff;color:var(--text);border-radius:6px;padding:0 9px;font-size:11px;cursor:pointer;white-space:nowrap}button:hover{background:#eef4ff}button:disabled{cursor:not-allowed;opacity:.55;background:#f2f4f7;color:#98a2b3}button.primary{background:var(--blue);border-color:var(--blue);color:#fff}button.warn{background:#fff7ed;border-color:#fed7aa;color:#9a3412}button.ghost{background:#f8fafc}
+main{max-width:1580px;margin:0 auto;padding:12px 16px 32px}.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:10px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow);padding:10px 12px;min-width:0}.span-12{grid-column:span 12}.span-8{grid-column:span 8}.span-6{grid-column:span 6}.span-4{grid-column:span 4}.span-3{grid-column:span 3}
+.panel h2{font-size:13px;margin:0 0 7px}.head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px}.head h2{margin:0}.cards{display:grid;grid-template-columns:repeat(11,minmax(96px,1fr));gap:8px}.metric{border:1px solid var(--line);border-radius:7px;background:#fbfcff;padding:7px 8px;min-height:58px}.metric .label{color:var(--muted);font-size:10px}.metric .value{font-size:17px;font-weight:700;margin-top:2px;word-break:break-word;line-height:1.15}.ok{color:var(--green)}.bad{color:var(--red)}.warnc{color:var(--amber)}
+table{width:100%;border-collapse:collapse;font-size:11px}th,td{border-bottom:1px solid var(--line);padding:4px 5px;text-align:left;white-space:nowrap;vertical-align:top}th{color:var(--muted);font-weight:600;font-size:10px;background:#fbfcff;position:sticky;top:0;z-index:1}.scroll{overflow:auto;max-height:330px}.tag{display:inline-block;border-radius:4px;padding:1px 5px;font-size:10px;font-weight:700}.t-ok{background:#ecfdf3;color:var(--green)}.t-fail{background:#fef3f2;color:var(--red)}.t-warn{background:#fff7ed;color:var(--amber)}.t-blue{background:#eef4ff;color:var(--blue)}.t-purple{background:#f4f3ff;color:var(--purple)}.rank{color:var(--muted);font-size:10px}.chips{display:flex;gap:5px;flex-wrap:wrap}.chip{border:1px solid var(--line);border-radius:6px;padding:3px 6px;background:#fff;font-size:10px;max-width:280px}.chip b{font-size:11px}.diag{display:block;color:var(--purple);margin-top:1px;white-space:normal;line-height:1.25}.notice{display:none;margin-bottom:10px;border-radius:7px;padding:8px 10px}.notice.show{display:block}.notice.ok{border:1px solid #abefc6;background:#ecfdf3;color:var(--green)}.notice.bad{border:1px solid #fecdca;background:#fef3f2;color:var(--red)}
+.ctrl{display:grid;grid-template-columns:minmax(360px,1fr) minmax(340px,1.4fr);gap:10px;align-items:start}.ctrl-line{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.job-card{border:1px solid #e4e9f3;background:var(--soft);border-radius:8px;padding:8px}.job-head{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:5px}.job-progress{display:none;height:4px;background:#e8edf5;border-radius:999px;overflow:hidden;margin:4px 0 6px}.job-progress span{display:block;height:100%;width:38%;background:linear-gradient(90deg,var(--blue),#12b76a);border-radius:999px;animation:runbar 1.2s ease-in-out infinite}.job-progress.active{display:block}@keyframes runbar{0%{transform:translateX(-105%)}100%{transform:translateX(270%)}}.job-tail{max-height:76px;overflow:auto;white-space:pre-wrap;color:#344054;background:#fff;border:1px solid #e8edf5;border-radius:6px;padding:6px;margin-top:6px}.runbook{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.run-step{border:1px solid var(--line);border-radius:8px;background:#fbfcff;padding:8px;min-height:82px}.run-title{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:3px}.run-step b{display:block;font-size:12px}.step-btn{height:23px;padding:0 7px;font-size:10px;background:#fff}.run-step .sub{line-height:1.35}.run-step.ok{border-color:#abefc6;background:#f6fef9}.run-step.warn{border-color:#fedf89;background:#fffcf5}.run-step.bad{border-color:#fecdca;background:#fffbfa}
+label{display:inline-flex;align-items:center;gap:3px;color:var(--muted)}input[type=checkbox]{width:13px;height:13px}input[type=number]{height:25px;width:58px;border:1px solid var(--line);border-radius:5px;padding:0 5px}.mono{font-family:Consolas,"Courier New",monospace}.list{display:grid;gap:4px}.item{border-bottom:1px solid #edf0f5;padding:3px 0}.item:last-child{border-bottom:0}.empty{color:var(--muted);padding:8px 0}.quality{display:grid;gap:4px;font-size:11px}.risk-row{background:#fffaf0}.wrap{white-space:normal;line-height:1.3}@media(max-width:1200px){.span-8,.span-6,.span-4,.span-3{grid-column:span 12}.cards{grid-template-columns:repeat(2,minmax(0,1fr))}.top{grid-template-columns:1fr}.ctrl{grid-template-columns:1fr}.runbook{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:760px){.runbook{grid-template-columns:1fr}.action-group{width:100%}}
 </style>
 </head>
 <body>
 <header>
   <div class="top">
-    <div><h1>分仓之神 V2.0</h1><div class="sub" id="genAt">等待刷新</div></div>
+    <div class="brand"><h1>分仓之神<br>V2.0</h1><div class="sub" id="genAt">等待刷新</div></div>
     <div class="actions">
-      <button onclick="refreshAll()">刷新</button>
-      <button onclick="selfCheck()">自检</button>
-      <button onclick="tailReady()">尾盘就绪</button>
-      <button onclick="healthCheck()">健康审计</button>
-      <button onclick="historyLoad()">历史</button>
-      <button class="primary" onclick="startJob('tail-once')">单轮分析</button>
-      <button class="primary" onclick="startJob('tail-watch')">尾盘监控</button>
-      <button onclick="startJob('run')">完整分析</button>
-      <button onclick="startJob('quality')">质检</button>
-      <button onclick="startJob('native-snapshot')">原生快照</button>
-      <button onclick="startJob('snapshot-prepare')">准备快照</button>
-      <button onclick="startJob('pre-tail-prep')">尾盘前准备</button>
-      <button onclick="startJob('x1-preheat')">X1预热</button>
-      <button onclick="startJob('tracking-ingest')">追踪入库</button>
-      <button onclick="startJob('factor-panel')">因子宽表</button>
-      <button onclick="startJob('pattern-tags')">模式标签</button>
-      <button onclick="startJob('outcome-update')">收益回填</button>
-      <button onclick="startJob('sentiment-status')">情绪周期</button>
-      <button onclick="startJob('post-market-refresh')">盘后刷新</button>
-      <button class="warn" onclick="startJob('test-push')">测试推送</button>
+      <div class="action-row">
+        <div class="action-group"><span class="group-title">查看</span><button onclick="refreshAll()">刷新</button><button onclick="selfCheck()">自检</button><button onclick="tailReady()">尾盘就绪</button><button onclick="healthCheck()">健康审计</button><button onclick="historyLoad()">历史</button></div>
+        <div class="action-group"><span class="group-title">尾盘</span><button class="primary" onclick="startJob('tail-once')">单轮分析</button><button class="primary" onclick="startJob('tail-watch')">尾盘监控</button><button onclick="startJob('pre-tail-prep')">尾盘前准备</button><button onclick="startJob('x1-preheat')">X1预热</button></div>
+      </div>
+      <div class="action-row">
+        <div class="action-group"><span class="group-title">数据</span><button onclick="startJob('quality')">质检</button><button onclick="startJob('native-snapshot')">原生快照</button><button onclick="startJob('snapshot-prepare')">准备快照</button><button onclick="startJob('run')">完整分析</button></div>
+        <div class="action-group"><span class="group-title">盘后</span><button onclick="startJob('tracking-ingest')">追踪入库</button><button onclick="startJob('outcome-update')">收益回填</button><button onclick="startJob('factor-panel')">因子宽表</button><button onclick="startJob('pattern-tags')">模式标签</button><button onclick="startJob('post-market-refresh')">盘后刷新</button></div>
+        <div class="action-group"><span class="group-title">工具</span><button onclick="startJob('sentiment-status')">情绪周期</button><button class="warn" onclick="startJob('test-push')">测试推送</button></div>
+      </div>
     </div>
   </div>
 </header>
 <main>
 <div class="notice" id="notice"></div>
 <div class="grid">
-<section class="panel span-12"><div class="ctrl"><label><input type="checkbox" id="pushBox" checked>推送</label><label><input type="checkbox" id="nowBox">立即执行尾盘监控</label><label>轮次<input type="number" id="maxCycles" min="0" value="0"></label><span class="sub" id="jobText">空闲</span><span class="sub mono" id="jobLog"></span></div></section>
+<section class="panel span-12">
+  <div class="ctrl">
+    <div class="job-card">
+      <div class="job-head"><b>运行选项</b><span class="sub">尾盘任务会按轮次刷新控制台</span></div>
+      <div class="ctrl-line"><label><input type="checkbox" id="pushBox" checked>推送</label><label><input type="checkbox" id="nowBox">立即执行尾盘监控</label><label>轮次<input type="number" id="maxCycles" min="0" value="0"></label></div>
+    </div>
+    <div class="job-card">
+      <div class="job-head"><b id="jobText">空闲</b><span class="sub mono" id="jobElapsed">-</span></div>
+      <div class="job-progress" id="jobProgress"><span></span></div>
+      <div class="sub mono wrap" id="jobLog">-</div>
+      <div class="job-tail mono" id="jobTail">暂无任务日志</div>
+    </div>
+  </div>
+</section>
 <section class="panel span-12"><div class="cards"><div class="metric"><div class="label">快照质量</div><div class="value" id="qok">-</div></div><div class="metric"><div class="label">交易日</div><div class="value" id="td">-</div></div><div class="metric"><div class="label">文件数</div><div class="value" id="fc">-</div></div><div class="metric"><div class="label">断档/零价</div><div class="value" id="dz">-</div></div><div class="metric"><div class="label">X1预热</div><div class="value" id="x1p">-</div></div><div class="metric"><div class="label">策略</div><div class="value" id="st">-</div></div><div class="metric"><div class="label">交集</div><div class="value" id="ol">-</div></div><div class="metric"><div class="label">XGB诊断</div><div class="value" id="xg">-</div></div><div class="metric"><div class="label">情绪</div><div class="value" id="sg">-</div></div><div class="metric"><div class="label">健康审计</div><div class="value" id="ha">-</div></div><div class="metric"><div class="label">耗时</div><div class="value" id="el">-</div></div></div></section>
+<section class="panel span-12"><div class="head"><h2>运行链路</h2><span class="sub">快照 → 四策略 → 诊断/情绪 → 追踪复盘</span></div><div class="runbook" id="runbookBox"></div></section>
 <section class="panel span-6"><div class="head"><h2>质量闸门</h2><span class="sub" id="snapSrc">-</span></div><div class="quality" id="qualityBox">-</div></section>
 <section class="panel span-6"><div class="head"><h2>尾盘就绪</h2><button onclick="tailReady()">检查</button></div><div id="tailBox" class="quality">-</div></section>
 <section class="panel span-12"><div class="head"><h2>健康审计</h2><button onclick="healthCheck()">执行</button></div><div id="healthBox" class="quality">-</div></section>
@@ -64,7 +69,7 @@ table{width:100%;border-collapse:collapse;font-size:11px}th,td{border-bottom:1px
 </div>
 </main>
 <script>
-const API='/api';let state={};
+const API='/api';let state={};let jobTimer=null;
 function $(id){return document.getElementById(id)}
 async function api(path){const r=await fetch(API+path);return await r.json()}
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
@@ -92,6 +97,22 @@ function renderHealth(h){
   const checks=h.checks||[];if(checks.length){html+='<div class="list">';checks.slice(0,36).forEach(c=>{html+=`<div class="item">${tag(c.ok,c.warning)} <b>${esc(c.area||'')}</b> / ${esc(c.name||'')}：${esc(c.detail||'')}</div>`});html+='</div>'}
   $('healthBox').innerHTML=html
 }
+function runStep(cls,title,main,detail,cmd,actionLabel){
+  const action=cmd?`<button class="step-btn" data-job-button onclick="event.stopPropagation();startJob('${cmd}')">${esc(actionLabel||'执行')}</button>`:'';
+  return `<div class="run-step ${cls}"><div class="run-title"><b>${esc(title)}</b>${action}</div><div>${main}</div><div class="sub wrap">${esc(detail||'')}</div></div>`
+}
+function renderRunbook(d){
+  const s=d.snapshot||{};const r=d.latest_run||{};const x=r.xgb_diagnosis||{};const tr=d.tracking||{};const os=((tr.outcomes||{}).summary)||{};const sent=d.sentiment||{};const xp=Object.assign({},d.x1_preheat||{},r.x1_preheat||{});
+  let html='';
+  html+=runStep(s.quality_ok?'ok':'bad','1 数据快照',s.quality_ok?'<span class="ok">质量通过</span>':'<span class="bad">质量阻断</span>',`交易日 ${s.trade_date||'-'}，文件 ${s.file_count||0}，断档/零价 ${s.discontinuous_count||0}/${s.zero_close_count||0}，主源 ${s.primary_source||'-'}`,'pre-tail-prep','预热');
+  const stOk=Number(r.strategies_ok||0), stRun=Number(r.strategies_run||0);const x1Text=x1Ready(xp)?'X1可用':'X1待预热/过期';
+  html+=runStep(stOk>=4?'ok':(stOk>=2?'warn':'bad'),'2 四策略出票',stRun?`${stOk}/${stRun} 成功`:'暂无运行',`交集 ${r.overlap_candidates||0}，${x1Text}，最新 ${r.file||'-'}`,'tail-once','单轮');
+  const diagOk=!!x.total||!!x.candidate_count;const sentOk=!!sent.ok;
+  html+=runStep(diagOk&&sentOk?'ok':(diagOk||sentOk?'warn':'bad'),'3 诊断与情绪',`${diagOk?'XGB已覆盖':'XGB待运行'} / ${sentOk?sentimentCard(sent):'<span class="warnc">情绪待核</span>'}`,`XGB ${(x.diagnosed_count??x.total) || 0}/${x.candidate_count || x.total || 0}，情绪日期 ${((sent.freshness||{}).sentiment_date)||'-'}`,'sentiment-status','情绪');
+  const rec=Number(tr.record_count||0), pending=Number(os.pending_count||0), tracked=Number(os.tracked_count||0);
+  html+=runStep(rec>0?'ok':'warn','4 追踪复盘',`${rec} 条记录`,`${tracked} 已回填，${pending} 等待未来K线，模式分组 ${((tr.latest_pattern_tags||{}).group_count)||0}`,'post-market-refresh','盘后');
+  $('runbookBox').innerHTML=html;
+}
 async function refreshAll(){try{state=await api('/status');renderStatus(state);const j=await api('/job');renderJob(j)}catch(e){notice('刷新失败: '+e,false)}}
 function renderStatus(d){
   $('genAt').textContent=(d.timestamp||'').replace('T',' ');
@@ -108,6 +129,7 @@ function renderStatus(d){
   renderHealth(d.health||{});
   renderSentiment(d.sentiment||{});
   $('sg').innerHTML=sentimentCard(d.sentiment||{});
+  renderRunbook(d);
   const r=d.latest_run;if(!r){$('st').textContent='-';$('ol').textContent='-';$('xg').textContent='-';$('el').textContent='-';$('strategyRows').innerHTML='<tr><td colspan="6" class="empty">暂无运行结果</td></tr>';renderTracking(d.tracking||{});renderEvolution(d.evolution||{});return}
   const rxp=Object.assign({},xp,r.x1_preheat||{});$('x1p').innerHTML=x1Ready(rxp)?'<span class="ok">可用</span>':'<span class="warnc">待预热</span>';
   $('latestFile').textContent=(r.file||'')+' | '+(r.timestamp||'').replace('T',' ');$('st').textContent=(r.strategies_ok||0)+'/'+(r.strategies_run||0);$('ol').textContent=r.overlap_candidates||0;$('el').textContent=Number(r.elapsed||0).toFixed(1)+'s';
@@ -189,9 +211,21 @@ async function selfCheck(){const d=await api('/self-check');let html=`<div class
 async function healthCheck(){try{const d=await api('/health');renderHealth(d);notice('健康审计已刷新',true)}catch(e){notice('健康审计失败: '+e,false)}}
 async function tailReady(){const d=await api('/tail-readiness');let html=`<div>窗口：<b>${esc(d.window_state)}</b> ${esc(d.window_start)}-${esc(d.window_end)}，间隔 ${d.interval_seconds}s，最多 ${d.max_pushes} 轮</div><div>状态：${d.can_push?'<span class="ok">可推送</span>':'<span class="bad">不可推送/非窗口</span>'}，阻断 ${d.blocking||0}，提醒 ${d.warnings||0}</div>`;(d.checks||[]).forEach(c=>{html+=`<div>${tag(c.ok,c.warning)} ${esc(c.name)}：${esc(c.detail)}</div>`});$('tailBox').innerHTML=html}
 async function historyLoad(){const d=await api('/history?n=12');let html='';(d.pipelines||[]).forEach(p=>{html+=`<tr><td>${esc((p.timestamp||'').replace('T',' ').slice(0,19))}</td><td>分析</td><td>${esc(p.tail_label||'')}</td><td>${p.strategies_ok}/${p.strategies_run}</td><td>${p.overlap_candidates}</td><td>${tag(p.quality_ok!==false,p.quality_ok===undefined)}</td><td>${Number(p.elapsed||0).toFixed(1)}s</td></tr>`});(d.tails||[]).forEach(t=>{html+=`<tr><td>${esc((t.started_at||t._mtime||'').replace('T',' ').slice(0,19))}</td><td>尾盘</td><td>${esc(t.label||'')}</td><td>${t.strategies_ok||0}</td><td>${t.overlap_candidates||0}</td><td>${tag(t.ok)}</td><td>${Number(t.elapsed_seconds||0).toFixed(1)}s</td></tr>`});$('historyRows').innerHTML=html||'<tr><td colspan="7" class="empty">暂无历史</td></tr>'}
-async function renderJob(j){$('jobText').textContent=j.running?('运行中：'+j.kind):(j.message||'空闲');$('jobLog').textContent=j.log_path||''}
+function setJobBusy(running){
+  document.querySelectorAll('button[onclick*="startJob"],button[data-job-button]').forEach(b=>{b.disabled=running});
+  const bar=$('jobProgress');if(bar)bar.classList.toggle('active',running);
+}
+function scheduleJobRefresh(running){setJobBusy(running);if(running&&!jobTimer){jobTimer=setInterval(refreshAll,1500)}else if(!running&&jobTimer){clearInterval(jobTimer);jobTimer=null}}
+async function renderJob(j){
+  const stage=j.stage||'idle';const running=!!j.running;
+  $('jobText').innerHTML=running?`<span class="warnc">运行中</span>：${esc(j.kind||'')}`:(stage==='failed'||stage==='error'?`<span class="bad">${esc(j.message||'失败')}</span>`:`<span class="ok">${esc(j.message||'空闲')}</span>`);
+  $('jobElapsed').textContent=running?`已运行 ${Number(j.elapsed_seconds||0).toFixed(1)}s`:(j.elapsed_seconds?`耗时 ${Number(j.elapsed_seconds||0).toFixed(1)}s`:'-');
+  $('jobLog').textContent=j.log_path||'-';
+  $('jobTail').textContent=(j.log_tail&&String(j.log_tail).trim())?j.log_tail:'暂无任务日志';
+  scheduleJobRefresh(running);
+}
 function notice(text,ok=true){const n=$('notice');n.className='notice show '+(ok?'ok':'bad');n.textContent=text;setTimeout(()=>{n.className='notice'},8000)}
-async function startJob(cmd){let path='/run?cmd='+encodeURIComponent(cmd);if($('pushBox').checked&&(cmd==='tail-once'||cmd==='tail-watch'||cmd==='run'))path+='&push=1';if($('nowBox').checked&&cmd==='tail-watch')path+='&no_wait=1';const mc=Number($('maxCycles').value||0);if(mc>0&&cmd==='tail-watch')path+='&max_cycles='+mc;try{const r=await api(path);if(r.ok){notice('已启动：'+r.cmd.join(' '),true);setTimeout(refreshAll,3000);setTimeout(refreshAll,15000);setTimeout(refreshAll,45000)}else notice(r.error||'启动失败',false)}catch(e){notice('启动失败: '+e,false)}}
+async function startJob(cmd){let path='/run?cmd='+encodeURIComponent(cmd);if($('pushBox').checked&&(cmd==='tail-once'||cmd==='tail-watch'||cmd==='run'))path+='&push=1';if($('nowBox').checked&&cmd==='tail-watch')path+='&no_wait=1';const mc=Number($('maxCycles').value||0);if(mc>0&&cmd==='tail-watch')path+='&max_cycles='+mc;try{setJobBusy(true);$('jobText').innerHTML='<span class="warnc">启动中</span>：'+esc(cmd);$('jobElapsed').textContent='-';const r=await api(path);if(r.ok){notice('已启动：'+r.cmd.join(' '),true);scheduleJobRefresh(true);refreshAll();setTimeout(refreshAll,800);setTimeout(refreshAll,2200);setTimeout(refreshAll,4500);setTimeout(refreshAll,7000);setTimeout(refreshAll,12000)}else{setJobBusy(false);notice(r.error||'启动失败',false)}}catch(e){setJobBusy(false);notice('启动失败: '+e,false)}}
 refreshAll();tailReady();historyLoad();setInterval(refreshAll,30000);
 </script>
 </body>

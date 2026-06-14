@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -26,6 +27,8 @@ _job_status: Dict[str, Any] = {
     "started_at": None,
     "returncode": None,
     "log_path": "",
+    "elapsed_seconds": 0,
+    "log_tail": "",
 }
 _quality_cache: Dict[str, Any] = {"expires": 0.0, "snapshot_dir": "", "source": "", "quality": None}
 _name_map_cache: Dict[str, Any] = {"key": "", "expires": 0.0, "map": {}}
@@ -748,40 +751,80 @@ def _health_api() -> Dict[str, Any]:
     return build_health_audit(load_settings(), official=False, persist=False)
 
 
+def _job_api_status() -> Dict[str, Any]:
+    with _job_lock:
+        status = dict(_job_status)
+    if status.get("running") and status.get("started_at"):
+        try:
+            started = datetime.fromisoformat(str(status["started_at"]))
+            status["elapsed_seconds"] = round((datetime.now() - started).total_seconds(), 1)
+        except Exception:
+            pass
+    return status
+
+
 def _run_job(cmd: list[str]) -> None:
     global _job_status
     display = " ".join(cmd)
+    started = datetime.now()
     with _job_lock:
         if _job_status.get("running"):
             return
+        log_path = _logs_dir() / f"dashboard_job_{started:%Y%m%d_%H%M%S}.log"
         _job_status = {
             "running": True,
             "kind": display,
             "stage": "running",
             "message": "执行中...",
-            "started_at": datetime.now().isoformat(timespec="seconds"),
+            "started_at": started.isoformat(timespec="seconds"),
             "returncode": None,
-            "log_path": "",
-        }
-    log_path = _logs_dir() / f"dashboard_job_{datetime.now():%Y%m%d_%H%M%S}.log"
+            "log_path": str(log_path),
+            "elapsed_seconds": 0,
+            "log_tail": "",
+    }
     try:
-        result = subprocess.run(
-            [PYTHON, str(ROOT / "main.py")] + cmd,
+        proc = subprocess.Popen(
+            [PYTHON, "-u", str(ROOT / "main.py")] + cmd,
             cwd=str(ROOT),
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
-            timeout=1800,
+            encoding="utf-8",
+            errors="replace",
+            env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
         )
-        log_path.write_text((result.stdout or "") + "\n--- STDERR ---\n" + (result.stderr or ""), encoding="utf-8")
+        tail_lines: list[str] = []
+        with log_path.open("w", encoding="utf-8", errors="replace") as handle:
+            handle.write(f"$ {PYTHON} -u {ROOT / 'main.py'} {display}\n")
+            handle.flush()
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                handle.write(line)
+                handle.flush()
+                clean = line.rstrip("\n")
+                if clean:
+                    tail_lines.append(clean)
+                    tail_lines = tail_lines[-8:]
+                with _job_lock:
+                    _job_status.update(
+                        {
+                            "message": clean[-120:] if clean else "执行中...",
+                            "elapsed_seconds": round((datetime.now() - started).total_seconds(), 1),
+                            "log_tail": "\n".join(tail_lines),
+                        }
+                    )
+            returncode = proc.wait(timeout=1800)
         with _job_lock:
             _job_status = {
                 "running": False,
                 "kind": display,
-                "stage": "done" if result.returncode == 0 else "failed",
-                "message": f"完成，返回码 {result.returncode}",
+                "stage": "done" if returncode == 0 else "failed",
+                "message": f"完成，返回码 {returncode}",
                 "started_at": None,
-                "returncode": result.returncode,
+                "returncode": returncode,
                 "log_path": str(log_path),
+                "elapsed_seconds": round((datetime.now() - started).total_seconds(), 1),
+                "log_tail": "\n".join(tail_lines),
             }
     except Exception as exc:
         log_path.write_text(str(exc), encoding="utf-8")
@@ -794,6 +837,8 @@ def _run_job(cmd: list[str]) -> None:
                 "started_at": None,
                 "returncode": None,
                 "log_path": str(log_path),
+                "elapsed_seconds": round((datetime.now() - started).total_seconds(), 1),
+                "log_tail": str(exc),
             }
 
 
@@ -850,7 +895,7 @@ class Handler(BaseHTTPRequestHandler):
             n = int(query.get("n", [10])[0])
             self._json({"pipelines": _load_recent_pipelines(n), "tails": _load_latest_tails(n)})
         elif path == "/api/job":
-            self._json(_job_status)
+            self._json(_job_api_status())
         elif path == "/api/ping":
             self._json({"ok": True, "time": datetime.now().isoformat(timespec="seconds")})
         elif path == "/api/run":
