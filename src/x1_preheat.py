@@ -117,6 +117,10 @@ def latest_status(cfg: Dict[str, Any], snapshot_dir: Optional[Path] = None) -> D
             age_minutes = round((datetime.now() - datetime.fromisoformat(generated_at)).total_seconds() / 60, 1)
         except Exception:
             age_minutes = None
+    preheat_cfg = ((cfg.get("strategies") or {}).get("x1beam") or {}).get("preheat") or {}
+    max_age_minutes = float(preheat_cfg.get("max_age_minutes", 60) or 60)
+    fresh_for_tail = age_minutes is None or float(age_minutes) <= max_age_minutes
+    effective_usable_for_tail = bool(usable) and fresh_for_tail
     summary_quality: Dict[str, Any] = {}
     try:
         x1_dir = Path(str((cfg.get("paths") or {}).get("x1_xin_dir", "")))
@@ -131,10 +135,15 @@ def latest_status(cfg: Dict[str, Any], snapshot_dir: Optional[Path] = None) -> D
             reason = "X1Beam 预热缓存文件不存在"
         elif current_sig and not matches_current:
             reason = "X1Beam 预热缓存与当前活动快照不匹配"
+        elif usable and not fresh_for_tail:
+            reason = f"X1Beam 预热缓存完整但已过有效期: {age_minutes}m/max{max_age_minutes:g}m"
 
     return {
         "exists": bool(manifest.get("exists")),
         "usable": usable,
+        "fresh_for_tail": fresh_for_tail,
+        "effective_usable_for_tail": effective_usable_for_tail,
+        "max_age_minutes": max_age_minutes,
         "completed": completed,
         "cache_exists": cache_exists,
         "matches_current_snapshot": matches_current,

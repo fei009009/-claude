@@ -71,7 +71,8 @@ def audit(cfg: Dict[str, Any], probe: bool = False) -> Dict[str, Any]:
         x1 / "beam_core.py",
         x1 / "cache" / "beam_merged.json",
     ])
-    if preheat_status.get("usable"):
+    x1_effective = bool(preheat_status.get("effective_usable_for_tail", preheat_status.get("usable")))
+    if x1_effective:
         _check_x1beam_cache(add, cfg, snapshot_dir, preheat_status)
         add(
             "X1Beam manifest",
@@ -80,10 +81,22 @@ def audit(cfg: Dict[str, Any], probe: bool = False) -> Dict[str, Any]:
         )
     else:
         _check_x1beam_cache(add, cfg, snapshot_dir, preheat_status)
+        if preheat_status.get("usable") and not preheat_status.get("fresh_for_tail", True):
+            detail = (
+                f"缓存完整但已过尾盘有效期: age={preheat_status.get('age_minutes')}m/"
+                f"max{preheat_status.get('max_age_minutes')}m；尾盘前需重新预热，"
+                "本轮不阻断 V10/V1/V4。"
+            )
+        else:
+            detail = (
+                preheat_status.get("error")
+                or preheat_status.get("reason")
+                or "未找到与当前快照匹配的完整预热 manifest；尾盘跳过 X1Beam，不阻断 V10/V1/V4"
+            )
         add(
             "X1Beam manifest",
             False,
-            preheat_status.get("error") or "未找到与当前快照匹配的完整预热 manifest；尾盘跳过 X1Beam，不阻断 V10/V1/V4",
+            detail,
             warning=True,
         )
 
@@ -162,6 +175,14 @@ def _check_x1beam_cache(add, cfg: Dict[str, Any], snapshot_dir: Path, preheat_st
             f"completed={preheat_status.get('completed')} cache={preheat_status.get('cache_exists')} "
             f"match={preheat_status.get('matches_current_snapshot')} top={preheat_status.get('top_count', 0)} "
             f"{preheat_status.get('reason') or preheat_status.get('error', '')}"
+        )
+        add("X1Beam 预热缓存", False, detail, warning=True)
+        return
+    if not preheat_status.get("fresh_for_tail", True):
+        detail = (
+            "缓存完整并匹配当前快照，但已过尾盘有效期，需尾盘前重新预热；"
+            f"age={preheat_status.get('age_minutes')}m/max{preheat_status.get('max_age_minutes')}m，"
+            "不阻断 V10/V1/V4。"
         )
         add("X1Beam 预热缓存", False, detail, warning=True)
         return

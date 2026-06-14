@@ -43,17 +43,20 @@ def build_evolution_status(cfg: Dict[str, Any]) -> Dict[str, Any]:
     xgb_diagnosed = int(diagnosis.get("diagnosed_count") or xgb_total or 0)
     xgb_covered = xgb_total > 0 and xgb_diagnosed >= xgb_total
     sentiment_linked = _pipeline_has_sentiment_overlay(pipeline)
+    sentiment_fresh = bool((sentiment_status.get("freshness") or {}).get("ok_for_snapshot"))
+    x1_tail_ready = bool(x1_status.get("effective_usable_for_tail", x1_status.get("usable")))
+    tradeability_feedback_ready = factor_rows > 0 and joined_outcomes > 0
 
     phases: List[Dict[str, Any]] = [
         {
             "key": "phase0",
             "name": "Phase 0 稳定基线与控制台清理",
-            "status": "done" if snapshot_ok and strategies_ok >= 4 and bool(x1_status.get("usable")) and xgb_covered else "in_progress",
-            "progress": _progress([snapshot_ok, strategies_ok >= 4, bool(x1_status.get("usable")), xgb_covered]),
+            "status": "done" if snapshot_ok and strategies_ok >= 4 and x1_tail_ready and xgb_covered else "in_progress",
+            "progress": _progress([snapshot_ok, strategies_ok >= 4, x1_tail_ready, xgb_covered]),
             "evidence": [
                 f"快照主源={snapshot_meta.get('primary_source') or '-'}，文件={snapshot_file_count}",
                 f"四策略={strategies_ok}/{strategies_run or 4}",
-                f"X1预热={'可用' if x1_status.get('usable') else '待预热'}",
+                f"X1预热={'尾盘可用' if x1_tail_ready else '待重新预热'}",
                 f"XGB覆盖={xgb_diagnosed}/{xgb_total}",
             ],
         },
@@ -82,18 +85,20 @@ def build_evolution_status(cfg: Dict[str, Any]) -> Dict[str, Any]:
         {
             "key": "phase3",
             "name": "Phase 3 情绪周期与可交易性过滤",
-            "status": "done" if sentiment_linked and (sentiment_status.get("freshness") or {}).get("ok_for_snapshot") else "in_progress" if sentiment_status.get("ok") else "pending",
+            "status": "done" if sentiment_linked and sentiment_fresh and tradeability_feedback_ready else "in_progress" if sentiment_status.get("ok") or sentiment_linked else "pending",
             "progress": _progress([
                 bool(sentiment_status.get("ok")),
-                bool((sentiment_status.get("freshness") or {}).get("ok_for_snapshot")),
+                sentiment_fresh,
                 bool((sentiment_status.get("timing") or {}).get("state")),
                 sentiment_linked,
+                tradeability_feedback_ready,
             ]),
             "evidence": [
                 f"情绪状态={(sentiment_status.get('timing') or {}).get('state', '-')}"
                 f"({(sentiment_status.get('timing') or {}).get('value', '-')})",
                 f"情绪日期={(sentiment_status.get('freshness') or {}).get('sentiment_date', '-')}",
                 "候选级情绪注解已启用。" if sentiment_linked else "等待下一次 pipeline 写入候选级情绪注解。",
+                "可交易性过滤已接入真实收益反馈。" if tradeability_feedback_ready else "可交易性目前仍是软标记，等待真实收益样本校准后再做硬过滤。",
             ],
         },
         {
@@ -115,7 +120,7 @@ def build_evolution_status(cfg: Dict[str, Any]) -> Dict[str, Any]:
         "factor_file": factor_path.name if factor_path else "",
         "pattern_file": pattern_path.name if pattern_path else "",
         "phases": phases,
-        "next_actions": _next_actions(tracked_count, joined_outcomes, factor_rows, bool(x1_status.get("usable"))),
+        "next_actions": _next_actions(tracked_count, joined_outcomes, factor_rows, x1_tail_ready),
     }
 
 
@@ -185,5 +190,6 @@ def _next_actions(tracked_count: int, joined_outcomes: int, factor_rows: int, x1
         actions.append("生成 candidate_factor_panel，先把策略/XGB/风险字段摊平成可统计宽表。")
     if joined_outcomes <= 0:
         actions.append("等待真实收益样本后刷新 historical_pattern_tags，把高胜率/高回撤模式贴回 Top10。")
+        actions.append("情绪周期和可交易性先作为软标记展示，暂不做硬剔除，避免无样本校准导致误杀。")
     actions.append("继续做手动 V10/V1/V4 结果对比，差异样本进入 parity 审计。")
     return actions[:5]

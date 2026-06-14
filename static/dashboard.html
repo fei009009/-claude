@@ -78,6 +78,12 @@ function statusTag(s){const k=s.status_kind||'';const label=s.status_label||(s.o
 function strategyErrorText(s){return s.display_error||s.error||''}
 function x1PreheatReason(xp){return xp.error||xp.reason||xp.message||''}
 function x1Ready(xp){return xp&&((xp.effective_usable_for_tail!==undefined)?xp.effective_usable_for_tail:xp.usable)}
+function datePart(x){return String(x||'').slice(0,10)}
+function snapshotIsToday(d,s){const today=datePart(d.timestamp);return !today||!s.trade_date||s.trade_date===today}
+function snapshotQualityMain(d,s){
+  if(!s.quality_ok)return '<span class="bad">质量阻断</span>';
+  return snapshotIsToday(d,s)?'<span class="ok">质量通过</span>':'<span class="warnc">自身通过/待今日</span>';
+}
 function fmtPct(v){if(v===null||v===undefined||v==='')return '-';const n=Number(v);return Number.isFinite(n)?(n>0?'+':'')+n.toFixed(2)+'%':esc(v)}
 function confidence(n,xgb){if(n>=4)return '<span class="tag t-fail">★★★★ 极高</span>';if(n>=3&&xgb)return '<span class="tag t-fail">★★★★ 极高</span>';if(n>=3)return '<span class="tag t-warn">★★★ 高</span>';if(n>=2&&xgb)return '<span class="tag t-blue">★★ 中</span>';return '<span class="tag">观察</span>'}
 function sigClass(s){return s==='STRONG_BUY'?'t-fail':(s==='BUY'?'t-warn':(s==='WATCH'?'t-blue':'t-purple'))}
@@ -103,8 +109,9 @@ function runStep(cls,title,main,detail,cmd,actionLabel){
 }
 function renderRunbook(d){
   const s=d.snapshot||{};const r=d.latest_run||{};const x=r.xgb_diagnosis||{};const tr=d.tracking||{};const os=((tr.outcomes||{}).summary)||{};const sent=d.sentiment||{};const xp=Object.assign({},d.x1_preheat||{},r.x1_preheat||{});
+  const snapFresh=snapshotIsToday(d,s);
   let html='';
-  html+=runStep(s.quality_ok?'ok':'bad','1 数据快照',s.quality_ok?'<span class="ok">质量通过</span>':'<span class="bad">质量阻断</span>',`交易日 ${s.trade_date||'-'}，文件 ${s.file_count||0}，断档/零价 ${s.discontinuous_count||0}/${s.zero_close_count||0}，主源 ${s.primary_source||'-'}`,'pre-tail-prep','预热');
+  html+=runStep(s.quality_ok?(snapFresh?'ok':'warn'):'bad','1 数据快照',snapshotQualityMain(d,s),`交易日 ${s.trade_date||'-'}，文件 ${s.file_count||0}，断档/零价 ${s.discontinuous_count||0}/${s.zero_close_count||0}，主源 ${s.primary_source||'-'}${snapFresh?'':'，正式尾盘需刷新到 '+datePart(d.timestamp)}`,'pre-tail-prep','预热');
   const stOk=Number(r.strategies_ok||0), stRun=Number(r.strategies_run||0);const x1Text=x1Ready(xp)?'X1可用':'X1待预热/过期';
   html+=runStep(stOk>=4?'ok':(stOk>=2?'warn':'bad'),'2 四策略出票',stRun?`${stOk}/${stRun} 成功`:'暂无运行',`交集 ${r.overlap_candidates||0}，${x1Text}，最新 ${r.file||'-'}`,'tail-once','单轮');
   const diagOk=!!x.total||!!x.candidate_count;const sentOk=!!sent.ok;
@@ -117,11 +124,13 @@ async function refreshAll(){try{state=await api('/status');renderStatus(state);c
 function renderStatus(d){
   $('genAt').textContent=(d.timestamp||'').replace('T',' ');
   const s=d.snapshot||{};const xp=d.x1_preheat||{};
-  $('qok').innerHTML=s.quality_ok?'<span class="ok">通过</span>':'<span class="bad">阻断</span>';
+  const snapFresh=snapshotIsToday(d,s);
+  $('qok').innerHTML=s.quality_ok?(snapFresh?'<span class="ok">通过</span>':'<span class="warnc">待今日</span>'):'<span class="bad">阻断</span>';
   $('td').textContent=s.trade_date||'-';$('fc').textContent=s.file_count||0;$('dz').textContent=(s.discontinuous_count||0)+'/'+(s.zero_close_count||0);
   $('x1p').innerHTML=x1Ready(xp)?'<span class="ok">可用</span>':'<span class="warnc">待预热</span>';
   $('snapSrc').textContent=(s.source||'-')+' | '+(s.primary_source||'');
   let q=`<div>目录：<span class="mono">${esc(s.dir||'')}</span></div><div>空文件：${s.empty_files||0}，断档：${s.discontinuous_count||0}，零价：${s.zero_close_count||0}</div>`;
+  if(s.quality_ok&&!snapFresh)q+=`<div class="warnc">快照自身质量通过，但交易日仍是 ${esc(s.trade_date||'-')}；正式尾盘出票前必须刷新到 ${esc(datePart(d.timestamp)||'今日')}。</div>`;
   const x1Reason=x1PreheatReason(xp);
   q+=`<div>X1预热：${x1Ready(xp)?'<span class="ok">可作为第四策略</span>':'<span class="warnc">未匹配完整缓存或已过期</span>'}，Top=${xp.top_count||0}，${esc(xp.trade_date||'-')}，有效期 ${xp.age_minutes??'-'}/${xp.max_age_minutes??'-'} 分钟${x1Reason?'，'+esc(x1Reason):''}</div>`;
   const xq=xp.summary_quality||{};const xc=xq.counts||{};if(Object.keys(xc).length)q+=`<div>X1规则池：${xq.complete?'<span class="ok">完整</span>':'<span class="warnc">待补齐</span>'}；close5=${xc.y_close_5d_5pct_merged_json||xc['y_close_5d_5pct_merged.json']||0}，noloss=${xc.y_close_5d_0pct_merged_json||xc['y_close_5d_0pct_merged.json']||0}，high5=${xc.y_high_5d_5pct_merged_json||xc['y_high_5d_5pct_merged.json']||0}，next=${xc.y_next_5pct_merged_json||xc['y_next_5pct_merged.json']||0}</div>`;
