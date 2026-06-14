@@ -88,7 +88,7 @@ snapshot:
     min_source_rows: 4500
     min_healthy_sources: 2
     max_price_mismatch: 20
-    require_tushare_primary: false
+    require_tushare_primary: true
     max_halt_gap_days: 4
     promote_only_after_quality_pass: true
 

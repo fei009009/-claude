@@ -48,7 +48,12 @@ def build_health_audit(
         _quality_detail(quality, snapshot_source, active_snapshot),
         data=quality.get("metrics") or {},
     )
-    if pipeline and active_snapshot.resolve() != pipeline_snapshot.resolve():
+    pipeline_snapshot_equivalent = bool(
+        pipeline
+        and active_snapshot.resolve() != pipeline_snapshot.resolve()
+        and _is_x1_frozen_snapshot_equivalent(cfg, active_snapshot, pipeline_snapshot)
+    )
+    if pipeline and active_snapshot.resolve() != pipeline_snapshot.resolve() and not pipeline_snapshot_equivalent:
         pipeline_quality = audit_snapshot(pipeline_snapshot, cfg, official=False) if pipeline_snapshot.exists() else {}
         add(
             "snapshot",
@@ -63,6 +68,19 @@ def build_health_audit(
                 "active_snapshot_dir": str(active_snapshot),
                 "active_snapshot_source": snapshot_source,
                 "pipeline_snapshot_dir": str(pipeline_snapshot),
+            },
+        )
+    elif pipeline_snapshot_equivalent:
+        add(
+            "snapshot",
+            "活动快照与最新运行快照",
+            True,
+            f"最新运行使用 X1 尾盘冻结快照，已确认与活动快照同源 | 活动={active_snapshot} | 冻结={pipeline_snapshot}",
+            data={
+                "active_snapshot_dir": str(active_snapshot),
+                "active_snapshot_source": snapshot_source,
+                "pipeline_snapshot_dir": str(pipeline_snapshot),
+                "equivalent": True,
             },
         )
     for blocker in (quality.get("blockers") or [])[:5]:
@@ -184,6 +202,19 @@ def format_pipeline_quality(quality: Dict[str, Any]) -> str:
         f"files={metrics.get('file_count', 0)} date={metrics.get('expected_trade_date', '')} "
         f"discontinuous={metrics.get('discontinuous_count', 0)} zero={metrics.get('zero_close_count', 0)}"
     )
+
+
+def _is_x1_frozen_snapshot_equivalent(cfg: Dict[str, Any], active_snapshot: Path, pipeline_snapshot: Path) -> bool:
+    try:
+        if not pipeline_snapshot.exists():
+            return False
+        status = x1_preheat_status(cfg, active_snapshot)
+        if not status.get("matches_current_snapshot"):
+            return False
+        frozen = Path(str(status.get("snapshot_dir") or ""))
+        return frozen.exists() and frozen.resolve() == pipeline_snapshot.resolve()
+    except Exception:
+        return False
 
 
 def _strategy_key(value: Any) -> str:

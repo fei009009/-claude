@@ -43,6 +43,7 @@ def audit(cfg: Dict[str, Any], probe: bool = False) -> Dict[str, Any]:
         )
     for blocker in quality.get("blockers", [])[:5]:
         add("快照阻断项", False, blocker)
+    _check_native_primary_source(add, cfg, quality)
 
     vip = Path(str(paths.get("vip_screener_dir", "")))
     legacy = Path(str(paths.get("legacy_screener_dir", "")))
@@ -192,6 +193,26 @@ def _check_file_group(add, name: str, files: List[Path], *, warning: bool = Fals
         add(name, False, "缺失: " + "; ".join(missing[:3]), warning=warning)
     else:
         add(name, True, f"{len(files)} 个文件就绪")
+
+
+def _check_native_primary_source(add, cfg: Dict[str, Any], quality: Dict[str, Any]) -> None:
+    native_cfg = ((cfg.get("snapshot") or {}).get("native") or {})
+    expected = str(native_cfg.get("primary_source") or "").strip()
+    require_expected = bool(native_cfg.get("require_tushare_primary", False))
+    if not expected:
+        return
+    meta = quality.get("meta") or {}
+    validation = meta.get("validation") or {}
+    actual = str(meta.get("primary_source") or validation.get("primary_source") or "").strip()
+    if actual == expected:
+        add("实时主源", True, f"{actual} 已作为正式快照主源")
+    else:
+        add(
+            "实时主源",
+            False,
+            f"期望 {expected}，实际 {actual or '未记录'}；正式出票需先重建/提升快照",
+            warning=not require_expected,
+        )
 
 
 def _wecom_channels(cfg: Dict[str, Any]) -> tuple[bool, int]:

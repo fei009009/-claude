@@ -288,6 +288,9 @@ def build_vendor_runtime_config(cfg: Dict[str, Any], *, allow_single_source: boo
     source_roles["enhancement_cross_check"] = ["zzshare", "eltdx", "sina_direct", "tencent_direct"]
     source_roles["verification_only"] = []
 
+    native_cfg = ((cfg.get("snapshot") or {}).get("native") or {})
+    require_tushare_primary = bool(native_cfg.get("require_tushare_primary", False))
+
     validation = vendor_cfg.setdefault("validation", {})
     validation.update(
         {
@@ -295,7 +298,7 @@ def build_vendor_runtime_config(cfg: Dict[str, Any], *, allow_single_source: boo
             "require_current_trade_date": True,
             "min_primary_rows": 4500,
             "min_coverage_ratio": 0.92,
-            "reject_cache_fallback_primary": False,
+            "reject_cache_fallback_primary": require_tushare_primary,
         }
     )
     vendor_cfg.setdefault("runtime", {})
@@ -331,6 +334,8 @@ def evaluate_source_health(cfg: Dict[str, Any], bridge_report: Dict[str, Any]) -
     tushare = by_name.get("tushare_rt_k") or {}
     if require_tushare and not tushare.get("ok"):
         blockers.append("tushare_rt_k 不可用，但配置要求必须可用")
+    if require_tushare and tushare.get("ok") and primary_source != "tushare_rt_k":
+        blockers.append(f"正式主源异常: 期望 tushare_rt_k，实际 {primary_source or '空'}")
     elif not tushare.get("ok"):
         warnings.append("tushare_rt_k 当前不可用，已按健康源自动降级")
     return {

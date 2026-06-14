@@ -570,6 +570,14 @@ def _v2_status() -> Dict[str, Any]:
         active_snapshot_mismatch = bool(pipeline and pipeline_snapshot.exists() and active_snapshot_dir.resolve() != pipeline_snapshot.resolve())
     except Exception:
         active_snapshot_mismatch = bool(pipeline and str(active_snapshot_dir) != str(pipeline_snapshot))
+    if active_snapshot_mismatch and x1_status.get("matches_current_snapshot"):
+        frozen_snapshot = Path(str(x1_status.get("snapshot_dir") or ""))
+        try:
+            if pipeline_snapshot.exists() and frozen_snapshot.exists() and pipeline_snapshot.resolve() == frozen_snapshot.resolve():
+                active_snapshot_mismatch = False
+        except Exception:
+            if str(pipeline_snapshot) == str(frozen_snapshot):
+                active_snapshot_mismatch = False
 
     status: Dict[str, Any] = {
         "timestamp": datetime.now().isoformat(timespec="seconds"),
