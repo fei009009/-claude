@@ -30,8 +30,31 @@ def build_diagnosis_map(diagnosis_results: Iterable[Any]) -> Dict[str, Dict[str,
     return mapping
 
 
-def annotate_strategy_results(results: List[Dict[str, Any]], diagnosis_results: Iterable[Any]) -> List[Dict[str, Any]]:
+def build_skip_map(diagnosis_summary: Dict[str, Any] | None) -> Dict[str, Dict[str, Any]]:
+    mapping: Dict[str, Dict[str, Any]] = {}
+    for item in (diagnosis_summary or {}).get("skipped") or []:
+        code = norm_code(item.get("code"))
+        if not code:
+            continue
+        reason = str(item.get("reason") or "not_diagnosed")
+        label = _skip_label(reason)
+        mapping[code] = {
+            "code": code,
+            "name": item.get("name", ""),
+            "reason": reason,
+            "badge": "XGB未覆盖",
+            "compact": f"XGB未覆盖: {label}",
+        }
+    return mapping
+
+
+def annotate_strategy_results(
+    results: List[Dict[str, Any]],
+    diagnosis_results: Iterable[Any],
+    diagnosis_summary: Dict[str, Any] | None = None,
+) -> List[Dict[str, Any]]:
     diag_map = build_diagnosis_map(diagnosis_results)
+    skip_map = build_skip_map(diagnosis_summary)
     for result in results or []:
         for row in result.get("top") or []:
             code = norm_code(row.get("code"))
@@ -40,11 +63,26 @@ def annotate_strategy_results(results: List[Dict[str, Any]], diagnosis_results: 
                 row["diagnosis"] = _public_diag(diag)
                 row["diagnosis_badge"] = diag.get("badge", "")
                 row["diagnosis_compact"] = diag.get("compact", "")
+            elif code in skip_map:
+                skipped = skip_map[code]
+                row["diagnosis"] = {
+                    "signal": "NO_DIAG",
+                    "badge": skipped["badge"],
+                    "compact": skipped["compact"],
+                    "skip_reason": skipped["reason"],
+                }
+                row["diagnosis_badge"] = skipped["badge"]
+                row["diagnosis_compact"] = skipped["compact"]
     return results
 
 
-def annotate_overlap(overlap: Dict[str, Any], diagnosis_results: Iterable[Any]) -> Dict[str, Any]:
+def annotate_overlap(
+    overlap: Dict[str, Any],
+    diagnosis_results: Iterable[Any],
+    diagnosis_summary: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
     diag_map = build_diagnosis_map(diagnosis_results)
+    skip_map = build_skip_map(diagnosis_summary)
     for row in (overlap or {}).get("overlaps") or []:
         code = norm_code(row.get("code"))
         diag = diag_map.get(code)
@@ -55,6 +93,16 @@ def annotate_overlap(overlap: Dict[str, Any], diagnosis_results: Iterable[Any]) 
             signal = str(diag.get("signal") or "")
             if signal in {"STRONG_BUY", "BUY"}:
                 row["xgb_confirmed"] = True
+        elif code in skip_map:
+            skipped = skip_map[code]
+            row["diagnosis"] = {
+                "signal": "NO_DIAG",
+                "badge": skipped["badge"],
+                "compact": skipped["compact"],
+                "skip_reason": skipped["reason"],
+            }
+            row["diagnosis_badge"] = skipped["badge"]
+            row["diagnosis_compact"] = skipped["compact"]
     return overlap
 
 
@@ -62,9 +110,10 @@ def annotate_all(
     results: List[Dict[str, Any]],
     overlap: Dict[str, Any],
     diagnosis_results: Iterable[Any],
+    diagnosis_summary: Dict[str, Any] | None = None,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
-    annotate_strategy_results(results, diagnosis_results)
-    annotate_overlap(overlap, diagnosis_results)
+    annotate_strategy_results(results, diagnosis_results, diagnosis_summary)
+    annotate_overlap(overlap, diagnosis_results, diagnosis_summary)
     return results, overlap
 
 
@@ -125,3 +174,9 @@ def _pct(value: Any) -> str:
         return f"{float(value):.0%}"
     except Exception:
         return "-"
+
+
+def _skip_label(reason: str) -> str:
+    if "Insufficient data" in reason and "<60" in reason:
+        return "历史K线不足60根，暂不能做XGB诊断"
+    return reason

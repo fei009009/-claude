@@ -385,12 +385,23 @@ def _diagnosis_summary(pipeline: Dict[str, Any], name_map: Dict[str, str]) -> Op
         list(raw_source_items) + raw_results + top_picks + watch_list,
         name_map,
     )
+    skipped = []
+    for item in diag.get("skipped") or []:
+        row = dict(item)
+        row["name"] = _display_stock_name(row.get("code"), row.get("name", ""), name_map)
+        skipped.append(row)
     return {
         "enabled": diag.get("enabled", True),
         "role": diag.get("role", "validation_layer"),
         "engine": diag.get("engine", ""),
         "independent_strategy": bool(diag.get("independent_strategy", False)),
         "total": diag.get("total", len(raw_results)),
+        "candidates_source": diag.get("candidates_source", ""),
+        "candidate_count": diag.get("candidate_count", len(raw_results)),
+        "diagnosed_count": diag.get("diagnosed_count", len(raw_results)),
+        "skipped_count": diag.get("skipped_count", len(skipped)),
+        "coverage_rate": diag.get("coverage_rate", 1.0 if raw_results else 0.0),
+        "skipped": skipped[:30],
         "signal_distribution": signals,
         "results": raw_results[:30],
         "top_picks": top_picks,

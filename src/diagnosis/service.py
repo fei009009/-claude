@@ -25,6 +25,49 @@ def collect_candidates_from_strategy_results(results: Iterable[Dict[str, Any]]) 
     return candidates
 
 
+def _coverage_fields(
+    candidates: List[Dict[str, str]],
+    diagnosis_results: List[DiagnosisResult],
+    sidecar_meta: Dict[str, Any] | None = None,
+    *,
+    candidates_source: str = "",
+) -> Dict[str, Any]:
+    sidecar_meta = sidecar_meta or {}
+    candidate_names = {norm_code(item.get("code")): repair_mojibake(item.get("name") or "") for item in candidates}
+    diagnosed_codes = {
+        norm_code(item.code if hasattr(item, "code") else getattr(item, "get", lambda _k, _d=None: _d)("code"))
+        for item in diagnosis_results or []
+    }
+    skipped = []
+    for err in sidecar_meta.get("errors") or []:
+        code = norm_code(err.get("code"))
+        if not code:
+            continue
+        skipped.append({
+            "code": code,
+            "name": candidate_names.get(code, ""),
+            "reason": str(err.get("error") or "diagnosis_failed"),
+        })
+    missing_without_error = sorted(set(candidate_names) - diagnosed_codes - {item["code"] for item in skipped})
+    for code in missing_without_error:
+        skipped.append({
+            "code": code,
+            "name": candidate_names.get(code, ""),
+            "reason": "not_diagnosed",
+        })
+    candidate_count = len(candidates)
+    diagnosed_count = len(diagnosed_codes)
+    skipped_count = len(skipped)
+    return {
+        "candidates_source": candidates_source,
+        "candidate_count": candidate_count,
+        "diagnosed_count": diagnosed_count,
+        "skipped_count": skipped_count,
+        "coverage_rate": round(diagnosed_count / candidate_count, 4) if candidate_count else 0.0,
+        "skipped": skipped[:50],
+    }
+
+
 def run_xgb_validation_layer(
     cfg: Dict[str, Any],
     results: Iterable[Dict[str, Any]],
@@ -75,6 +118,12 @@ def run_xgb_validation_layer(
                     "summary": report.get("summary", ""),
                     "sidecar": sidecar_meta,
                 }
+                summary.update(_coverage_fields(
+                    candidates,
+                    diagnosis_results,
+                    sidecar_meta,
+                    candidates_source=candidates_source,
+                ))
                 return diagnosis_results, summary
         except Exception as exc:
             if not diagnosis_cfg.get("allow_legacy_fallback", True):
@@ -116,4 +165,10 @@ def run_xgb_validation_layer(
         "report_path": report.get("report_path", ""),
         "summary": report.get("summary", ""),
     }
+    summary.update(_coverage_fields(
+        candidates,
+        diagnosis_results,
+        {},
+        candidates_source=candidates_source,
+    ))
     return diagnosis_results, summary

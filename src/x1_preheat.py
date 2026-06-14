@@ -210,6 +210,14 @@ def run_preheat(
 
     if not quality.get("ok") and not force:
         base_manifest["error"] = "; ".join(quality.get("blockers", [])) or "snapshot quality failed"
+        existing = load_manifest(cfg)
+        existing_cache = Path(str(existing.get("cache_path") or ""))
+        if existing.get("completed") is True and existing_cache.exists():
+            existing["last_failed_at"] = base_manifest["generated_at"]
+            existing["last_failure_error"] = base_manifest["error"]
+            existing["last_failure_quality_summary"] = base_manifest["quality_summary"]
+            write_manifest(cfg, existing)
+            return existing
         write_manifest(cfg, base_manifest)
         return base_manifest
 

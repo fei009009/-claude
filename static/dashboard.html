@@ -95,8 +95,10 @@ function renderXgb(x){
   if(!x){$('xgbBox').innerHTML='<div class="empty">未运行诊断</div>';return}
   const sd=x.signal_distribution||{};
   let html=`<div class="item">定位：验证层，不参与交集计数${x.engine?'；引擎：'+esc(x.engine):''}</div><div class="item">总数：${x.total||0}；STRONG_BUY ${sd.STRONG_BUY||0}；BUY ${sd.BUY||0}；WATCH ${sd.WATCH||0}；NEUTRAL ${sd.NEUTRAL||0}</div>`;
+  if(x.candidate_count!==undefined){html+=`<div class="item">候选来源：${esc(x.candidates_source||'四策略Top候选')}；四策略并集 ${x.candidate_count||0}；已诊断 ${x.diagnosed_count||0}；跳过 ${x.skipped_count||0}；覆盖率 ${(Number(x.coverage_rate||0)*100).toFixed(1)}%</div>`}
   if(x.error)html+=`<div class="item bad">${esc(x.error)}</div>`;
   if(x.summary)html+=`<div class="item sub wrap">${esc(x.summary)}</div>`;
+  if((x.skipped||[]).length){html+=`<div class="item warnc wrap">未诊断：${(x.skipped||[]).slice(0,12).map(s=>`${esc(s.code)} ${esc(s.name||'')}(${esc(s.reason||'')})`).join('；')}</div>`}
   const merged=[];const seen=new Set();
   [...(x.top_picks||[]),...(x.watch_list||[]),...(x.results||[])].forEach(p=>{const c=p.code||'';if(!c||seen.has(c))return;seen.add(c);merged.push(p)});
   merged.slice(0,12).forEach(p=>{

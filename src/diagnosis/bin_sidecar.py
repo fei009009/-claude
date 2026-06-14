@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
+import pandas as pd
+
 from src.common import norm_code, repair_mojibake, safe_float
 from src.diagnosis.engine import DiagnosisResult
 
@@ -29,8 +31,10 @@ def _load_sidecar(xgb_dir: Path, snapshot_dir: Path):
         sys.path.insert(0, str(xgb_dir))
     features = importlib.import_module("xgb_bin_features")
     features.DATA_DIR = Path(snapshot_dir).resolve()
+    features.read_tdx = _read_tdx_robust
     diagnose = importlib.import_module("xgb_bin_diagnose")
     diagnose.DATA_DIR = Path(snapshot_dir).resolve()
+    diagnose.read_tdx = _read_tdx_robust
     return diagnose
 
 
@@ -38,6 +42,7 @@ def _load_reporter(xgb_dir: Path, snapshot_dir: Path):
     _load_sidecar(xgb_dir, snapshot_dir)
     reporter = importlib.import_module("xgb_bin_report")
     reporter.DATA_DIR = Path(snapshot_dir).resolve()
+    reporter.read_tdx = _read_tdx_robust
     reporter.OUT_DIR = Path(xgb_dir).resolve() / "screener_output" / "bin_reports"
     reporter.OUT_DIR.mkdir(parents=True, exist_ok=True)
     for name in ("_stock_name", "_latest_local_data_date"):
@@ -45,6 +50,67 @@ def _load_reporter(xgb_dir: Path, snapshot_dir: Path):
         if hasattr(cached, "cache_clear"):
             cached.cache_clear()
     return reporter
+
+
+def _read_tdx_robust(path: Path):
+    """Read both standard TDX exports and V2.0 work-snapshot TXT files.
+
+    The XGB sidecar was originally written for GBK TDX files. V2.0 snapshots are
+    UTF-8 and may contain a compact first header line, so the original reader can
+    return None even when hundreds of bars are present.
+    """
+    path = Path(path)
+    if not path.exists():
+        return None
+    text = None
+    for encoding in ("utf-8-sig", "utf-8", "gb18030", "gbk"):
+        try:
+            text = path.read_text(encoding=encoding, errors="strict")
+            break
+        except Exception:
+            continue
+    if text is None:
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            return None
+    rows: List[List[Any]] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.replace(",", "\t").split()
+        if len(parts) < 7:
+            continue
+        raw_date = str(parts[0]).replace("/", "-")
+        if not (len(raw_date) >= 8 and raw_date[0].isdigit()):
+            continue
+        try:
+            date = pd.to_datetime(raw_date)
+            rows.append([
+                date,
+                float(parts[1]),
+                float(parts[2]),
+                float(parts[3]),
+                float(parts[4]),
+                float(parts[5]),
+                float(parts[6]),
+            ])
+        except Exception:
+            continue
+    if not rows:
+        return None
+    df = pd.DataFrame(rows, columns=["date", "open", "high", "low", "close", "volume", "amount"])
+    df = df.dropna(subset=["date", "open", "high", "low", "close"])
+    df = df[df["close"] > 0]
+    if df.empty:
+        return None
+    return (
+        df.sort_values("date")
+        .drop_duplicates(subset=["date"], keep="last")
+        .reset_index(drop=True)
+        .set_index("date")
+    )
 
 
 def _signal(row: Dict[str, Any]) -> str:

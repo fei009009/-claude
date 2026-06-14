@@ -173,7 +173,7 @@ def cmd_run(args: argparse.Namespace) -> int:
                 persist=True,
             )
             diagnosis_results = [item.to_dict() if hasattr(item, "to_dict") else item for item in diagnosis_objects]
-            results, overlap = annotate_all(results, overlap, diagnosis_results)
+            results, overlap = annotate_all(results, overlap, diagnosis_results, diagnosis_summary)
             print(diagnosis_summary.get("summary") or f"诊断完成: {diagnosis_summary.get('total', 0)} 只")
             if diagnosis_summary.get("report_path"):
                 print(f"诊断报告: {diagnosis_summary['report_path']}")

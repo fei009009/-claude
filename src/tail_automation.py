@@ -169,6 +169,7 @@ def _run_cycle(snapshot_dir: Path, cfg: Dict[str, Any], label: str) -> Dict[str,
                     cycle.get("results", []),
                     cycle.get("overlap", {}),
                     cycle["diagnosis_results"],
+                    diag_summary,
                 )
                 _emit(f"  诊断: {diag_summary.get('signal_distribution', {})}")
                 if diag_summary.get("report_path"):
