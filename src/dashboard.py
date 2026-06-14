@@ -530,6 +530,7 @@ def _diagnosis_summary(pipeline: Dict[str, Any], name_map: Dict[str, str]) -> Op
 
 
 def _v2_status() -> Dict[str, Any]:
+    from src.evolution_status import build_evolution_status
     from src.quality_gate import resolve_snapshot
     from src.settings import load_settings
     from src.x1_preheat import latest_status as x1_preheat_status
@@ -601,6 +602,7 @@ def _v2_status() -> Dict[str, Any]:
         },
         "x1_preheat": x1_status,
         "tracking": _tracking_status(cfg),
+        "evolution": build_evolution_status(cfg),
         "health": _health_status(cfg),
         "latest_run": None,
         "boundary": None,
@@ -821,6 +823,10 @@ class Handler(BaseHTTPRequestHandler):
             self._json(_tail_readiness())
         elif path == "/api/health":
             self._json(_health_api())
+        elif path == "/api/evolution":
+            from src.evolution_status import build_evolution_status
+            from src.settings import load_settings
+            self._json(build_evolution_status(load_settings()))
         elif path == "/api/history":
             n = int(query.get("n", [10])[0])
             self._json({"pipelines": _load_recent_pipelines(n), "tails": _load_latest_tails(n)})

@@ -452,16 +452,29 @@ def _audit_tracking(cfg: Dict[str, Any], pipeline: Dict[str, Any], pipeline_path
     tracked_count = safe_int(outcome_summary.get("tracked_count"), 0)
     pending_count = safe_int(outcome_summary.get("pending_count"), 0)
     outcome_generated = bool(outcomes.get("generated_at"))
-    outcome_ok = outcome_generated and (outcome_count == 0 or tracked_count > 0 or pending_count < outcome_count)
+    failure_counts = outcome_summary.get("failure_counts") or {}
+    waiting_future_bars = (
+        outcome_generated
+        and outcome_count > 0
+        and pending_count == outcome_count
+        and safe_int(failure_counts.get("no_future_bar_yet"), 0) == outcome_count
+    )
+    outcome_ok = outcome_generated and (
+        outcome_count == 0
+        or tracked_count > 0
+        or pending_count < outcome_count
+        or waiting_future_bars
+    )
+    outcome_state = "等待未来K线" if waiting_future_bars else "已回填" if tracked_count > 0 else "待生成"
     add(
         "tracking",
         "收益回填状态",
         outcome_ok,
         (
             f"generated={outcomes.get('generated_at', '') or '-'} "
-            f"outcomes={outcome_count} tracked={tracked_count} pending={pending_count}"
+            f"outcomes={outcome_count} tracked={tracked_count} pending={pending_count} | {outcome_state}"
         ),
-        warning=True,
+        warning=not outcome_ok,
         data=outcome_summary,
     )
     factor_dir = output_root(cfg) / "factors"

@@ -54,6 +54,7 @@ table{width:100%;border-collapse:collapse;font-size:11px}th,td{border-bottom:1px
 <section class="panel span-8"><div class="head"><h2>多策略 Top10 交集</h2><span class="sub">V10 / V1 / V4 / X1Beam 对等</span></div><div class="scroll"><table><thead><tr><th>代码</th><th>名称</th><th>覆盖</th><th>策略</th><th>V10</th><th>V1</th><th>V4</th><th>X1B</th><th>置信</th><th>XGB诊断</th></tr></thead><tbody id="overlapRows"></tbody></table></div></section>
 <section class="panel span-4"><div class="head"><h2>XGB 诊断验证层</h2><span class="tag t-purple">非独立策略</span></div><div id="xgbBox" class="list">-</div></section>
 <section class="panel span-12"><div class="head"><h2>追踪与因子宽表</h2><span class="sub">盘后胜率统计的数据底座</span></div><div id="trackingBox" class="quality">-</div></section>
+<section class="panel span-12"><div class="head"><h2>进化阶段</h2><span class="sub">V2.1 / V2.2 路线状态</span></div><div id="evolutionBox" class="quality">-</div></section>
 <section class="panel span-12"><div class="head"><h2>边界候选与风险</h2><span class="sub">8.5%-10.5% 临界涨幅审计</span></div><div class="scroll"><table><thead><tr><th>代码</th><th>名称</th><th>涨幅</th><th>是否入选</th><th>风险原因</th><th>策略排名</th></tr></thead><tbody id="boundaryRows"></tbody></table></div></section>
 <section class="panel span-12"><div class="head"><h2>策略明细卡片</h2></div><div class="grid" id="detailCards"></div></section>
 <section class="panel span-6"><div class="head"><h2>系统自检</h2><button onclick="selfCheck()">执行</button></div><div id="selfRows" class="list">-</div></section>
@@ -100,11 +101,11 @@ function renderStatus(d){
   const xq=xp.summary_quality||{};const xc=xq.counts||{};if(Object.keys(xc).length)q+=`<div>X1规则池：${xq.complete?'<span class="ok">完整</span>':'<span class="warnc">待补齐</span>'}；close5=${xc.y_close_5d_5pct_merged_json||xc['y_close_5d_5pct_merged.json']||0}，noloss=${xc.y_close_5d_0pct_merged_json||xc['y_close_5d_0pct_merged.json']||0}，high5=${xc.y_high_5d_5pct_merged_json||xc['y_high_5d_5pct_merged.json']||0}，next=${xc.y_next_5pct_merged_json||xc['y_next_5pct_merged.json']||0}</div>`;
   (s.blockers||[]).forEach(x=>q+=`<div class="bad">阻断：${esc(x)}</div>`);(s.warnings||[]).forEach(x=>q+=`<div class="warnc">提醒：${esc(x)}</div>`);$('qualityBox').innerHTML=q;
   renderHealth(d.health||{});
-  const r=d.latest_run;if(!r){$('st').textContent='-';$('ol').textContent='-';$('xg').textContent='-';$('el').textContent='-';$('strategyRows').innerHTML='<tr><td colspan="6" class="empty">暂无运行结果</td></tr>';renderTracking(d.tracking||{});return}
+  const r=d.latest_run;if(!r){$('st').textContent='-';$('ol').textContent='-';$('xg').textContent='-';$('el').textContent='-';$('strategyRows').innerHTML='<tr><td colspan="6" class="empty">暂无运行结果</td></tr>';renderTracking(d.tracking||{});renderEvolution(d.evolution||{});return}
   const rxp=Object.assign({},xp,r.x1_preheat||{});$('x1p').innerHTML=x1Ready(rxp)?'<span class="ok">可用</span>':'<span class="warnc">待预热</span>';
   $('latestFile').textContent=(r.file||'')+' | '+(r.timestamp||'').replace('T',' ');$('st').textContent=(r.strategies_ok||0)+'/'+(r.strategies_run||0);$('ol').textContent=r.overlap_candidates||0;$('el').textContent=Number(r.elapsed||0).toFixed(1)+'s';
   const x=r.xgb_diagnosis||{};const sd=x.signal_distribution||{};$('xg').textContent=(sd.STRONG_BUY||0)+'强/'+(sd.BUY||0)+'买/'+(sd.WATCH||0)+'观';
-  renderStrategies(r.strategies||[]);renderOverlaps(r.overlaps||[]);renderXgb(x);renderTracking(d.tracking||{});renderBoundary(d.boundary||{});renderCards(r.strategies||[])
+  renderStrategies(r.strategies||[]);renderOverlaps(r.overlaps||[]);renderXgb(x);renderTracking(d.tracking||{});renderEvolution(d.evolution||{});renderBoundary(d.boundary||{});renderCards(r.strategies||[])
 }
 function renderStrategies(rows){let html='';rows.forEach(s=>{const picks=(s.top||[]).map(p=>`<span class="chip"><b>${esc(p.code)}</b> ${esc(p.name)} <span class="rank">#${p.rank}</span>${diagBadge(p)}</span>`).join('');const errCls=(s.status_kind==='warn')?'warnc':'bad';html+=`<tr><td><b>${esc(s.name)}</b></td><td>${statusTag(s)}</td><td>${s.count}</td><td>${Number(s.elapsed||0).toFixed(1)}s</td><td><div class="chips">${picks||'-'}</div></td><td class="${errCls} wrap">${esc(strategyErrorText(s))}</td></tr>`});$('strategyRows').innerHTML=html||'<tr><td colspan="6" class="empty">暂无策略结果</td></tr>'}
 function renderOverlaps(rows){let html='';rows.forEach(o=>{const rk=o.ranks||{};html+=`<tr><td><b>${esc(o.code)}</b></td><td>${esc(o.name)}</td><td>${o.strategy_count}</td><td>${esc((o.strategies||[]).join('+'))}</td><td>${rk.v10||'-'}</td><td>${rk.v1||'-'}</td><td>${rk.v4||'-'}</td><td>${rk.x1beam||'-'}</td><td>${confidence(o.strategy_count||0,o.xgb_confirmed)}</td><td class="wrap">${diagText(o)?esc(diagText(o)):'-'}</td></tr>`});$('overlapRows').innerHTML=html||'<tr><td colspan="10" class="empty">暂无交集</td></tr>'}
@@ -146,6 +147,17 @@ function renderTracking(t){
   const top=f.top||[];if(top.length){html+='<div class="chips">';top.forEach(x=>{const notes=Array.isArray(x.factor_notes)?x.factor_notes.join('，'):String(x.factor_notes||'');html+=`<span class="chip"><b>${esc(x.code)}</b> ${esc(x.name)} <span class="rank">${esc(x.selection_layer)} / ${x.strategy_count||0}策 / ${Number(x.preliminary_score||0).toFixed(3)}</span><span class="diag">${esc(x.diagnosis_badge||notes||'-')}</span></span>`});html+='</div>'}
   const ptop=p.top||[];if(ptop.length){html+='<div class="chips">';ptop.forEach(x=>{const pos=(x.positive_tags||[]).map(v=>v.label).filter(Boolean).slice(0,2).join('，')||'待积累';const risk=(x.risk_tags||[]).map(v=>v.label).filter(Boolean).slice(0,2).join('，');html+=`<span class="chip"><b>${esc(x.code)}</b> ${esc(x.name)} <span class="rank">${esc(x.selection_layer)} / ${x.strategy_count||0}策 / ${Number(x.pattern_tag_score||0).toFixed(2)}</span><span class="diag">历史标签：${esc(pos)}${risk?'；风险：'+esc(risk):''}</span></span>`});html+='</div>'}
   $('trackingBox').innerHTML=html
+}
+function renderEvolution(e){
+  if(!e){$('evolutionBox').innerHTML='<div class="empty">暂无进化状态</div>';return}
+  let html=`<div><b>${esc(e.current_stage||'-')}</b></div>`;
+  html+=`<div>最新 pipeline：<span class="mono">${esc(e.pipeline_file||'-')}</span>；宽表：<span class="mono">${esc(e.factor_file||'-')}</span>；模式：<span class="mono">${esc(e.pattern_file||'-')}</span></div>`;
+  (e.phases||[]).forEach(p=>{
+    const ok=p.status==='done';const warn=p.status==='in_progress';
+    html+=`<div class="item">${tag(ok,warn)} <b>${esc(p.name)}</b>：${esc(p.status||'')}，进度 ${p.progress||0}%<div class="sub wrap">${esc((p.evidence||[]).join('；'))}</div></div>`;
+  });
+  const acts=e.next_actions||[];if(acts.length)html+=`<div class="item"><b>下一步</b>：${acts.map(esc).join('；')}</div>`;
+  $('evolutionBox').innerHTML=html
 }
 function renderBoundary(b){let html='';((b.risks||[])).forEach(x=>{const rk=Object.entries(x.strategy_ranks||{}).map(([k,v])=>k.toUpperCase()+'#'+v).join(' ');html+=`<tr class="risk-row"><td><b>${esc(x.code)}</b></td><td>${esc(x.name||'')}</td><td>${Number(x.pct||0).toFixed(2)}%</td><td>${x.in_any_top?tag(true):tag(false,true)}</td><td class="wrap">${esc((x.risk_reasons||[]).join(','))}</td><td>${esc(rk||'-')}</td></tr>`});$('boundaryRows').innerHTML=html||'<tr><td colspan="6" class="empty">暂无边界风险</td></tr>'}
 function renderCards(rows){let html='';rows.forEach(s=>{html+=`<section class="panel span-3"><h2>${esc(s.name)}</h2><table><thead><tr><th>#</th><th>代码</th><th>名称</th><th>诊断</th></tr></thead><tbody>`;(s.top||[]).slice(0,10).forEach(p=>{html+=`<tr><td>${p.rank}</td><td><b>${esc(p.code)}</b></td><td>${esc(p.name)}</td><td class="wrap">${diagText(p)?esc(diagText(p)):'-'}</td></tr>`});html+='</tbody></table></section>'});$('detailCards').innerHTML=html||'<div class="empty">暂无明细</div>'}
