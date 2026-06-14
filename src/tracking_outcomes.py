@@ -138,6 +138,14 @@ def label_record(
         "strategy_count": safe_int(record.get("strategy_count"), 0),
         "diagnosis_signal": record.get("diagnosis_signal") or "NO_DIAG",
         "diagnosis_badge": record.get("diagnosis_badge", ""),
+        "sentiment_date": record.get("sentiment_date", ""),
+        "sentiment_state": record.get("sentiment_state", ""),
+        "sentiment_state_group": record.get("sentiment_state_group", ""),
+        "sentiment_value": safe_int(record.get("sentiment_value"), 0),
+        "sentiment_action": record.get("sentiment_action", ""),
+        "sentiment_position_multiplier": safe_float(record.get("sentiment_position_multiplier"), 1.0),
+        "sentiment_tradeability_score": safe_float(record.get("sentiment_tradeability_score"), 0.0),
+        "sentiment_score_bucket": _sentiment_score_bucket(record),
         "entry_price": entry_price,
         "snapshot_dir": str(snapshot_dir),
         "kline_path": str(kline_path or ""),
@@ -319,6 +327,20 @@ def _group_by(outcomes: List[Dict[str, Any]], key: str) -> Dict[str, Any]:
     return {name: _group_summary(rows) for name, rows in sorted(buckets.items())}
 
 
+def _sentiment_score_bucket(row: Dict[str, Any]) -> str:
+    state = str(row.get("sentiment_state") or "").strip()
+    if not state:
+        return "UNKNOWN"
+    score = safe_float(row.get("sentiment_tradeability_score"), 0.0)
+    if score >= 0.65:
+        return "env>=0.65"
+    if score >= 0.45:
+        return "0.45<=env<0.65"
+    if score >= 0.25:
+        return "0.25<=env<0.45"
+    return "env<0.25"
+
+
 def _group_by_strategy_source(outcomes: List[Dict[str, Any]]) -> Dict[str, Any]:
     buckets: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     for row in outcomes:
@@ -346,6 +368,10 @@ def summarize_outcomes(outcomes: List[Dict[str, Any]]) -> Dict[str, Any]:
         "by_strategy_count": _group_by(outcomes, "strategy_count"),
         "by_diagnosis_signal": _group_by(outcomes, "diagnosis_signal"),
         "by_strategy_source": _group_by_strategy_source(outcomes),
+        "by_sentiment_state": _group_by(outcomes, "sentiment_state"),
+        "by_sentiment_state_group": _group_by(outcomes, "sentiment_state_group"),
+        "by_sentiment_action": _group_by(outcomes, "sentiment_action"),
+        "by_sentiment_score_bucket": _group_by(outcomes, "sentiment_score_bucket"),
     }
     return summary
 

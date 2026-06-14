@@ -37,6 +37,19 @@ def _strategy_combo(record: Dict[str, Any]) -> str:
     return "+".join(sorted(str(item) for item in sources if item)) or "none"
 
 
+def _sentiment_score_bucket(record: Dict[str, Any]) -> str:
+    if not str(record.get("sentiment_state") or "").strip():
+        return "UNKNOWN"
+    score = safe_float(record.get("sentiment_tradeability_score"), 0.0)
+    if score >= 0.65:
+        return "env>=0.65"
+    if score >= 0.45:
+        return "0.45<=env<0.65"
+    if score >= 0.25:
+        return "0.25<=env<0.45"
+    return "env<0.25"
+
+
 def pattern_keys(record: Dict[str, Any]) -> List[PatternKey]:
     keys: List[PatternKey] = [
         ("selection_layer", str(record.get("selection_layer") or "unknown")),
@@ -44,6 +57,15 @@ def pattern_keys(record: Dict[str, Any]) -> List[PatternKey]:
         ("strategy_combo", _strategy_combo(record)),
         ("diagnosis_signal", str(record.get("diagnosis_signal") or "NO_DIAG")),
     ]
+    if record.get("sentiment_state"):
+        keys.extend(
+            [
+                ("sentiment_state", str(record.get("sentiment_state"))),
+                ("sentiment_state_group", str(record.get("sentiment_state_group") or "unknown")),
+                ("sentiment_action", str(record.get("sentiment_action") or "unknown")),
+                ("sentiment_score_bucket", _sentiment_score_bucket(record)),
+            ]
+        )
     xgb_score = safe_float(record.get("xgb_blended_score"), 0.0)
     if xgb_score >= 0.60:
         keys.append(("xgb_score_bucket", "xgb>=0.60"))
@@ -195,6 +217,9 @@ def tag_candidates(
             "strategy_sources": record.get("strategy_sources", []),
             "strategy_count": record.get("strategy_count", 0),
             "diagnosis_signal": record.get("diagnosis_signal", ""),
+            "sentiment_state": record.get("sentiment_state", ""),
+            "sentiment_action": record.get("sentiment_action", ""),
+            "sentiment_tradeability_score": record.get("sentiment_tradeability_score", 0),
             "pattern_tag_score": tag_score,
             "positive_tags": positive,
             "risk_tags": risks,

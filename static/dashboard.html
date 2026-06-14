@@ -143,16 +143,22 @@ function renderXgb(x){
   if(x.report_path)html+=`<div class="item sub mono wrap">批量报告：${esc(x.report_path)}</div>`;
   $('xgbBox').innerHTML=html
 }
+function outcomeGroupLine(g,n=4){
+  const entries=Object.entries(g||{}).sort((a,b)=>(b[1].tracked_count||0)-(a[1].tracked_count||0)||String(a[0]).localeCompare(String(b[0]))).slice(0,n);
+  if(!entries.length)return '-';
+  return entries.map(([k,v])=>`${esc(k||'UNKNOWN')}：${v.tracked_count||0}/${v.count||0}，次高${(Number(v.next_high_profit_rate||0)*100).toFixed(0)}%，5日${(Number(v.five_day_5pct_hit_rate||0)*100).toFixed(0)}%`).join('；')
+}
 function renderTracking(t){
   if(!t||t.error){$('trackingBox').innerHTML=`<div class="warnc">追踪摘要暂不可用：${esc((t||{}).error||'暂无数据')}</div>`;return}
   const f=t.latest_factor_panel||{};const p=t.latest_pattern_tags||{};const os=((t.outcomes||{}).summary)||{};const oo=os.overall||{};
   let html=`<div>追踪库：${t.record_count||0} 条，${t.unique_code_count||0} 只股票，覆盖 pipeline ${t.unique_pipeline_count||0} 个</div>`;
   html+=`<div>层级：${esc(JSON.stringify(t.by_selection_layer||{}))}；策略数：${esc(JSON.stringify(t.by_strategy_count||{}))}；诊断：${esc(JSON.stringify(t.by_diagnosis_signal||{}))}</div>`;
   html+=`<div>收益追踪：可追踪 ${os.tracked_count||0}，完整5日 ${os.completed_count||0}，等待 ${os.pending_count||0}；次日冲高盈利率 ${(Number(oo.next_high_profit_rate||0)*100).toFixed(1)}%，5日5%达标率 ${(Number(oo.five_day_5pct_hit_rate||0)*100).toFixed(1)}%</div>`;
+  html+=`<div>情绪分组：状态 ${outcomeGroupLine(os.by_sentiment_state)}；动作 ${outcomeGroupLine(os.by_sentiment_action)}；环境分 ${outcomeGroupLine(os.by_sentiment_score_bucket)}</div>`;
   html+=`<div>最新宽表：<span class="mono">${esc(f.file||'未生成')}</span>，行数 ${f.row_count||0}，更新时间 ${esc((f.mtime||'').replace('T',' '))}</div>`;
   html+=`<div>历史模式标签：<span class="mono">${esc(p.file||'未生成')}</span>，已回填样本 ${p.joined_outcome_count||0}，分组 ${p.group_count||0}，候选 ${p.candidate_count||0}</div>`;
   const top=f.top||[];if(top.length){html+='<div class="chips">';top.forEach(x=>{const notes=Array.isArray(x.factor_notes)?x.factor_notes.join('，'):String(x.factor_notes||'');html+=`<span class="chip"><b>${esc(x.code)}</b> ${esc(x.name)} <span class="rank">${esc(x.selection_layer)} / ${x.strategy_count||0}策 / ${Number(x.preliminary_score||0).toFixed(3)}</span><span class="diag">${esc(x.diagnosis_badge||notes||'-')}</span></span>`});html+='</div>'}
-  const ptop=p.top||[];if(ptop.length){html+='<div class="chips">';ptop.forEach(x=>{const pos=(x.positive_tags||[]).map(v=>v.label).filter(Boolean).slice(0,2).join('，')||'待积累';const risk=(x.risk_tags||[]).map(v=>v.label).filter(Boolean).slice(0,2).join('，');html+=`<span class="chip"><b>${esc(x.code)}</b> ${esc(x.name)} <span class="rank">${esc(x.selection_layer)} / ${x.strategy_count||0}策 / ${Number(x.pattern_tag_score||0).toFixed(2)}</span><span class="diag">历史标签：${esc(pos)}${risk?'；风险：'+esc(risk):''}</span></span>`});html+='</div>'}
+  const ptop=p.top||[];if(ptop.length){html+='<div class="chips">';ptop.forEach(x=>{const pos=(x.positive_tags||[]).map(v=>v.label).filter(Boolean).slice(0,2).join('，')||'待积累';const risk=(x.risk_tags||[]).map(v=>v.label).filter(Boolean).slice(0,2).join('，');const sent=x.sentiment_state?`；情绪：${x.sentiment_state}/${x.sentiment_action||'-'}`:'';html+=`<span class="chip"><b>${esc(x.code)}</b> ${esc(x.name)} <span class="rank">${esc(x.selection_layer)} / ${x.strategy_count||0}策 / ${Number(x.pattern_tag_score||0).toFixed(2)}</span><span class="diag">历史标签：${esc(pos)}${risk?'；风险：'+esc(risk):''}${esc(sent)}</span></span>`});html+='</div>'}
   $('trackingBox').innerHTML=html
 }
 function renderEvolution(e){
