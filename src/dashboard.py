@@ -29,6 +29,7 @@ _job_status: Dict[str, Any] = {
 }
 _quality_cache: Dict[str, Any] = {"expires": 0.0, "snapshot_dir": "", "source": "", "quality": None}
 _name_map_cache: Dict[str, Any] = {"key": "", "expires": 0.0, "map": {}}
+_health_cache: Dict[str, Any] = {"expires": 0.0, "report": None}
 
 
 def _json_bytes(data: Any) -> bytes:
@@ -272,6 +273,35 @@ def _latest_factor_panel() -> Dict[str, Any]:
     }
 
 
+def _latest_pattern_tags() -> Dict[str, Any]:
+    from src.common import repair_mojibake
+
+    out_dir = ROOT / "outputs" / "patterns"
+    current = out_dir / "historical_pattern_tags_current.json"
+    files = [current] if current.exists() else []
+    if not files and out_dir.exists():
+        files = sorted(out_dir.glob("historical_pattern_tags_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not files:
+        return {"exists": False, "file": "", "candidate_count": 0, "top": []}
+    path = files[0]
+    data = _load_json(path) or {}
+    top = []
+    for row in (data.get("candidate_tags") or [])[:12]:
+        clean = dict(row)
+        clean["name"] = repair_mojibake(clean.get("name", ""))
+        top.append(clean)
+    return {
+        "exists": True,
+        "file": path.name,
+        "path": str(path),
+        "mtime": datetime.fromtimestamp(path.stat().st_mtime).isoformat(timespec="seconds"),
+        "joined_outcome_count": data.get("joined_outcome_count", 0),
+        "group_count": data.get("group_count", 0),
+        "candidate_count": len(data.get("candidate_tags") or []),
+        "top": top,
+    }
+
+
 def _strategy_display_state(result: Dict[str, Any]) -> Dict[str, str]:
     key = str(result.get("strategy_name", "")).lower()
     error = str(result.get("error") or "")
@@ -311,13 +341,37 @@ def _tracking_status(cfg: Dict[str, Any]) -> Dict[str, Any]:
             "by_diagnosis_signal": report.get("by_diagnosis_signal", {}),
             "strategy_source_counts": report.get("strategy_source_counts", {}),
             "latest_factor_panel": _latest_factor_panel(),
+            "latest_pattern_tags": _latest_pattern_tags(),
             "outcomes": {
                 "generated_at": outcomes.get("generated_at", ""),
                 "summary": outcomes.get("summary", {}),
             },
         }
     except Exception as exc:
-        return {"error": str(exc), "latest_factor_panel": _latest_factor_panel()}
+        return {"error": str(exc), "latest_factor_panel": _latest_factor_panel(), "latest_pattern_tags": _latest_pattern_tags()}
+
+
+def _health_status(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    now_ts = time.time()
+    if _health_cache.get("report") is not None and float(_health_cache.get("expires", 0) or 0) > now_ts:
+        return dict(_health_cache.get("report") or {})
+    try:
+        from src.health_audit import build_health_audit
+
+        report = build_health_audit(cfg, official=False, persist=False)
+        compact = {
+            "generated_at": report.get("generated_at", ""),
+            "status": report.get("status", ""),
+            "blocking": report.get("blocking", 0),
+            "warnings": report.get("warnings", 0),
+            "pipeline_file": report.get("pipeline_file", ""),
+            "checks": report.get("checks", [])[:40],
+            "sections": report.get("sections", {}),
+        }
+    except Exception as exc:
+        compact = {"status": "error", "blocking": 1, "warnings": 0, "error": str(exc), "checks": []}
+    _health_cache.update({"expires": now_ts + 60, "report": compact})
+    return compact
 
 
 def _load_latest_tails(n: int = 10) -> list[Dict[str, Any]]:
@@ -419,7 +473,15 @@ def _v2_status() -> Dict[str, Any]:
     from src.x1_preheat import latest_status as x1_preheat_status
 
     cfg = load_settings()
-    snapshot_dir, source = resolve_snapshot(cfg)
+    active_snapshot_dir, active_source = resolve_snapshot(cfg)
+    pipeline = _load_latest_pipeline()
+    pipeline_snapshot = Path(str((pipeline or {}).get("snapshot_dir") or ""))
+    if pipeline and pipeline_snapshot.exists():
+        snapshot_dir = pipeline_snapshot
+        source = "latest_pipeline.snapshot_dir"
+    else:
+        snapshot_dir = active_snapshot_dir
+        source = active_source
     now_ts = time.time()
     cache_hit = (
         _quality_cache.get("quality") is not None
@@ -439,13 +501,27 @@ def _v2_status() -> Dict[str, Any]:
     metrics = quality.get("metrics", {})
     meta = quality.get("meta", {})
     x1_status = x1_preheat_status(cfg, snapshot_dir)
-    pipeline = _load_latest_pipeline()
+    preheat_cfg = ((cfg.get("strategies") or {}).get("x1beam") or {}).get("preheat") or {}
+    max_age = float(preheat_cfg.get("max_age_minutes", 60) or 60)
+    age = x1_status.get("age_minutes")
+    fresh = age is None or float(age) <= max_age
+    x1_status["max_age_minutes"] = max_age
+    x1_status["fresh_for_tail"] = fresh
+    x1_status["effective_usable_for_tail"] = bool(x1_status.get("usable")) and fresh
+    active_snapshot_mismatch = False
+    try:
+        active_snapshot_mismatch = active_snapshot_dir.resolve() != snapshot_dir.resolve()
+    except Exception:
+        active_snapshot_mismatch = str(active_snapshot_dir) != str(snapshot_dir)
 
     status: Dict[str, Any] = {
         "timestamp": datetime.now().isoformat(timespec="seconds"),
         "snapshot": {
             "source": source,
             "dir": str(snapshot_dir),
+            "active_source": active_source,
+            "active_dir": str(active_snapshot_dir),
+            "active_mismatch": active_snapshot_mismatch,
             "quality_ok": quality.get("ok", False),
             "trade_date": metrics.get("expected_trade_date") or meta.get("trade_date") or "",
             "file_count": metrics.get("file_count", 0),
@@ -460,6 +536,7 @@ def _v2_status() -> Dict[str, Any]:
         },
         "x1_preheat": x1_status,
         "tracking": _tracking_status(cfg),
+        "health": _health_status(cfg),
         "latest_run": None,
         "boundary": None,
     }
@@ -581,6 +658,13 @@ def _tail_readiness() -> Dict[str, Any]:
     }
 
 
+def _health_api() -> Dict[str, Any]:
+    from src.health_audit import build_health_audit
+    from src.settings import load_settings
+
+    return build_health_audit(load_settings(), official=False, persist=False)
+
+
 def _run_job(cmd: list[str]) -> None:
     global _job_status
     display = " ".join(cmd)
@@ -669,6 +753,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json(_self_check())
         elif path == "/api/tail-readiness":
             self._json(_tail_readiness())
+        elif path == "/api/health":
+            self._json(_health_api())
         elif path == "/api/history":
             n = int(query.get("n", [10])[0])
             self._json({"pipelines": _load_recent_pipelines(n), "tails": _load_latest_tails(n)})
@@ -693,6 +779,7 @@ class Handler(BaseHTTPRequestHandler):
             "x1-preheat",
             "tracking-ingest",
             "factor-panel",
+            "pattern-tags",
             "outcome-update",
         }
         if cmd not in allowed:

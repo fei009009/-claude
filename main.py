@@ -16,6 +16,8 @@ from src.diagnosis.annotate import annotate_all
 from src.diagnosis.service import run_xgb_validation_layer
 from src.diagnosis.xgb_calibration import build_xgb_calibration_status
 from src.candidate_factor_panel import build_candidate_factor_panel
+from src.health_audit import build_health_audit
+from src.historical_pattern_tags import build_historical_pattern_tags
 from src.pipeline import build_overlap_analysis, run_all_strategies
 from src.quality_gate import audit_snapshot, format_quality_summary, resolve_snapshot
 from src.settings import ensure_output_dirs, load_settings
@@ -518,6 +520,48 @@ def cmd_outcome_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_health(args: argparse.Namespace) -> int:
+    cfg = load_settings()
+    report = build_health_audit(cfg, official=args.official, persist=True)
+    print(
+        f"健康审计: {report.get('status')} | "
+        f"阻断 {report.get('blocking', 0)} | 提醒 {report.get('warnings', 0)}"
+    )
+    for item in report.get("checks", []):
+        if item.get("ok"):
+            tag = "OK"
+        elif item.get("warning"):
+            tag = "WARN"
+        else:
+            tag = "FAIL"
+        print(f"  [{tag}] {item.get('area')} / {item.get('name')}: {item.get('detail')}")
+    print(f"报告: {report.get('report_path', '')}")
+    return 0 if report.get("blocking", 0) == 0 else 2
+
+
+def cmd_pattern_tags(args: argparse.Namespace) -> int:
+    cfg = load_settings()
+    report = build_historical_pattern_tags(
+        cfg,
+        latest=not args.all,
+        min_samples=args.min_samples,
+        persist=True,
+    )
+    print(
+        f"历史模式标签: joined={report.get('joined_outcome_count', 0)} | "
+        f"groups={report.get('group_count', 0)} | candidates={len(report.get('candidate_tags', []))}"
+    )
+    for row in report.get("candidate_tags", [])[:10]:
+        positives = ",".join(str(item.get("label", "")) for item in row.get("positive_tags", [])[:2]) or "-"
+        risks = ",".join(str(item.get("label", "")) for item in row.get("risk_tags", [])[:2]) or "-"
+        print(
+            f"  {row.get('code')} {row.get('name')} | "
+            f"score={row.get('pattern_tag_score', 0)} | 正向={positives} | 风险={risks}"
+        )
+    print(f"报告: {report.get('report_path', '')}")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="分仓之神 V2.0：V10/V1/V4/X1Beam 四策略 + XGB 诊断验证层")
     sub = parser.add_subparsers(dest="cmd")
@@ -621,6 +665,15 @@ def main() -> int:
     outcome_rep = sub.add_parser("outcome-report", help="汇总当前收益追踪结果")
     outcome_rep.add_argument("--detail", action="store_true")
     outcome_rep.set_defaults(func=cmd_outcome_report)
+
+    health = sub.add_parser("health", help="端到端健康审计：数据、策略、XGB、X1Beam、追踪")
+    health.add_argument("--official", action="store_true", help="按正式尾盘口径检查交易日")
+    health.set_defaults(func=cmd_health)
+
+    pattern_tags = sub.add_parser("pattern-tags", help="生成历史稳定模式标签并回贴最新候选")
+    pattern_tags.add_argument("--all", action="store_true", help="候选回贴范围使用全部 pipeline；默认只回贴最新")
+    pattern_tags.add_argument("--min-samples", type=int, default=3, help="形成历史标签的最小样本数")
+    pattern_tags.set_defaults(func=cmd_pattern_tags)
 
     args = parser.parse_args()
     if not args.cmd:

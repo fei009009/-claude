@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from src.quality_gate import audit_snapshot, format_quality_summary, quality_config, resolve_snapshot
-from src.x1_preheat import latest_status as x1_preheat_status
+from src.x1_preheat import select_tail_snapshot
 
 
 def audit(cfg: Dict[str, Any], probe: bool = False) -> Dict[str, Any]:
@@ -26,13 +26,20 @@ def audit(cfg: Dict[str, Any], probe: bool = False) -> Dict[str, Any]:
             blocking += 1
 
     paths = cfg.get("paths", {})
-    snapshot_dir, snapshot_source = resolve_snapshot(cfg)
+    active_snapshot_dir, active_snapshot_source = resolve_snapshot(cfg)
+    snapshot_dir, snapshot_source, preheat_status = select_tail_snapshot(cfg, active_snapshot_dir)
     quality = audit_snapshot(snapshot_dir, cfg, official=True)
     add(
         "快照质量闸门",
         bool(quality.get("ok")),
         f"{format_quality_summary(quality)} | 来源={snapshot_source} | {snapshot_dir}",
     )
+    if active_snapshot_dir.resolve() != snapshot_dir.resolve():
+        add(
+            "尾盘快照选择",
+            True,
+            f"活动={active_snapshot_dir} ({active_snapshot_source}) | 尾盘使用={snapshot_dir} ({snapshot_source})",
+        )
     for blocker in quality.get("blockers", [])[:5]:
         add("快照阻断项", False, blocker)
 
@@ -61,7 +68,6 @@ def audit(cfg: Dict[str, Any], probe: bool = False) -> Dict[str, Any]:
         x1 / "cache" / "beam_merged.json",
     ])
     _check_x1beam_cache(add, cfg, snapshot_dir)
-    preheat_status = x1_preheat_status(cfg, snapshot_dir)
     if preheat_status.get("usable"):
         add(
             "X1Beam manifest",
