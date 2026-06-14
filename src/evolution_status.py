@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from src.common import output_root
+from src.sentiment_regime import build_sentiment_regime
 from src.snapshot_manager import live_current_dir
 from src.x1_preheat import latest_status as x1_preheat_status
 
@@ -22,6 +23,7 @@ def build_evolution_status(cfg: Dict[str, Any]) -> Dict[str, Any]:
     snapshot_dir = live_current_dir(cfg)
     snapshot_meta = _load_json(snapshot_dir / "snapshot_meta.json")
     x1_status = x1_preheat_status(cfg, snapshot_dir)
+    sentiment_status = build_sentiment_regime(cfg)
 
     summary = pipeline.get("summary") or {}
     diagnosis = pipeline.get("diagnosis") or {}
@@ -40,6 +42,7 @@ def build_evolution_status(cfg: Dict[str, Any]) -> Dict[str, Any]:
     xgb_total = int(diagnosis.get("total") or diagnosis.get("candidate_count") or 0)
     xgb_diagnosed = int(diagnosis.get("diagnosed_count") or xgb_total or 0)
     xgb_covered = xgb_total > 0 and xgb_diagnosed >= xgb_total
+    sentiment_linked = _pipeline_has_sentiment_overlay(pipeline)
 
     phases: List[Dict[str, Any]] = [
         {
@@ -79,9 +82,19 @@ def build_evolution_status(cfg: Dict[str, Any]) -> Dict[str, Any]:
         {
             "key": "phase3",
             "name": "Phase 3 情绪周期与可交易性过滤",
-            "status": "pending",
-            "progress": 0,
-            "evidence": ["尚未进入正式落地；等待追踪样本稳定后接入情绪/流动性过滤。"],
+            "status": "done" if sentiment_linked and (sentiment_status.get("freshness") or {}).get("ok_for_snapshot") else "in_progress" if sentiment_status.get("ok") else "pending",
+            "progress": _progress([
+                bool(sentiment_status.get("ok")),
+                bool((sentiment_status.get("freshness") or {}).get("ok_for_snapshot")),
+                bool((sentiment_status.get("timing") or {}).get("state")),
+                sentiment_linked,
+            ]),
+            "evidence": [
+                f"情绪状态={(sentiment_status.get('timing') or {}).get('state', '-')}"
+                f"({(sentiment_status.get('timing') or {}).get('value', '-')})",
+                f"情绪日期={(sentiment_status.get('freshness') or {}).get('sentiment_date', '-')}",
+                "候选级情绪注解已启用。" if sentiment_linked else "等待下一次 pipeline 写入候选级情绪注解。",
+            ],
         },
         {
             "key": "phase4",
@@ -139,6 +152,19 @@ def _progress(items: List[bool]) -> int:
     if not items:
         return 0
     return int(round(sum(1 for item in items if item) / len(items) * 100))
+
+
+def _pipeline_has_sentiment_overlay(pipeline: Dict[str, Any]) -> bool:
+    if not pipeline.get("sentiment"):
+        return False
+    for result in pipeline.get("strategies") or []:
+        for row in result.get("top") or []:
+            if row.get("sentiment_context") or row.get("sentiment_action"):
+                return True
+    for row in (pipeline.get("overlap") or {}).get("overlaps") or []:
+        if row.get("sentiment_context") or row.get("sentiment_action"):
+            return True
+    return False
 
 
 def _current_stage(tracked_count: int, joined_outcomes: int) -> str:

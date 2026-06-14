@@ -21,6 +21,8 @@ from src.historical_pattern_tags import build_historical_pattern_tags
 from src.native_snapshot import build_native_snapshot, promote_latest_native_snapshot
 from src.pipeline import build_overlap_analysis, run_all_strategies
 from src.quality_gate import audit_snapshot, format_quality_summary, resolve_snapshot
+from src.sentiment_regime import build_sentiment_regime
+from src.sentiment_overlay import annotate_all_with_sentiment
 from src.settings import ensure_output_dirs, load_settings
 from src.snapshot_manager import live_current_dir, prepare_live_snapshot
 from src.tail_automation import run_tail_once, run_tail_watch
@@ -60,6 +62,7 @@ def _write_pipeline(
     boundary: dict | None,
     diagnosis_summary: dict | None,
     diagnosis_results: list[dict] | None,
+    sentiment_report: dict | None = None,
     x1_preheat: dict | None = None,
     *,
     prefix: str = "pipeline_v2",
@@ -75,10 +78,23 @@ def _write_pipeline(
         "boundary": boundary,
         "diagnosis": diagnosis_summary,
         "diagnosis_results": diagnosis_results or [],
+        "sentiment": sentiment_report or {},
         "x1_preheat": x1_preheat,
     }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return path
+
+
+def _trade_date_from_quality(quality: dict) -> str:
+    metrics = quality.get("metrics") or {}
+    meta = quality.get("meta") or {}
+    return str(
+        metrics.get("expected_trade_date")
+        or metrics.get("observed_trade_date")
+        or metrics.get("meta_trade_date")
+        or meta.get("trade_date")
+        or ""
+    )
 
 
 def _precheck_strategies(cfg: dict) -> int:
@@ -185,6 +201,27 @@ def cmd_run(args: argparse.Namespace) -> int:
             diagnosis_summary = {"enabled": True, "role": "validation_layer", "error": str(exc)}
             print(f"XGB 诊断异常: {exc}")
 
+    sentiment_report = {}
+    _banner("Phase 3 情绪周期过滤层")
+    try:
+        sentiment_report = build_sentiment_regime(
+            cfg,
+            trade_date=_trade_date_from_quality(quality),
+            persist=True,
+        )
+        results, overlap = annotate_all_with_sentiment(results, overlap, sentiment_report)
+        timing = sentiment_report.get("timing") or {}
+        freshness = sentiment_report.get("freshness") or {}
+        print(
+            f"情绪: {timing.get('date', '-')} {timing.get('state', '-')}({timing.get('value', 0)}) | "
+            f"仓位系数={timing.get('position_multiplier', 1)} | "
+            f"快照对齐={'OK' if freshness.get('ok_for_snapshot') else 'WARN'}"
+        )
+        print(f"尾盘建议: {timing.get('tail_guidance', '')}")
+    except Exception as exc:
+        sentiment_report = {"ok": False, "error": str(exc)}
+        print(f"情绪周期融合跳过: {exc}")
+
     pipeline_path = _write_pipeline(
         cfg,
         snapshot_dir,
@@ -195,6 +232,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         boundary,
         diagnosis_summary,
         diagnosis_results[:50],
+        sentiment_report,
         x1_status,
     )
     print(f"\n结果文件: {pipeline_path}")
@@ -209,6 +247,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             results,
             overlap,
             diagnosis_results=diagnosis_results[:50],
+            sentiment_report=sentiment_report,
             cfg=cfg,
             label="手动触发",
         )
@@ -671,6 +710,45 @@ def cmd_outcome_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_sentiment_status(args: argparse.Namespace) -> int:
+    cfg = load_settings()
+    ensure_output_dirs(cfg)
+    report = build_sentiment_regime(cfg, trade_date=args.trade_date or "", persist=bool(args.persist))
+    timing = report.get("timing") or {}
+    sentiment = report.get("sentiment") or {}
+    freshness = report.get("freshness") or {}
+    forward = report.get("next_forward") or {}
+    print(
+        f"情绪周期: {timing.get('date', '-')} | "
+        f"{timing.get('state', '-')}({timing.get('value', 0)}) | "
+        f"风险偏好={timing.get('risk_appetite', '-')} | "
+        f"仓位系数={timing.get('position_multiplier', 0)}"
+    )
+    print(
+        f"生态: 涨停={sentiment.get('uplimit_num', 0)} 跌停={sentiment.get('downlimit_num', 0)} "
+        f"炸板={sentiment.get('fried_board_num', 0)} 连板高度={sentiment.get('max_lb_num', 0)} "
+        f"封板率={sentiment.get('seal_rate', 0):.1%} 广度={sentiment.get('breadth_score', 0):.1%}"
+    )
+    if forward.get("date"):
+        print(
+            f"下一交易日前瞻: {forward.get('date')} timing={forward.get('value')} "
+            f"confidence={forward.get('confidence', 0):.1%} turn_prob={forward.get('turn_prob', 0):.1%}"
+        )
+    print(
+        f"新鲜度: ok={freshness.get('ok_for_snapshot')} "
+        f"timing={freshness.get('timing_date')} sentiment={freshness.get('sentiment_date')} "
+        f"updated={freshness.get('manifest_updated_at', '-')}"
+    )
+    print(f"建议: {timing.get('tail_guidance', '')}")
+    if report.get("missing"):
+        print("缺失文件:")
+        for item in report["missing"]:
+            print(f"  {item}")
+    if report.get("report_path"):
+        print(f"报告: {report['report_path']}")
+    return 0 if report.get("ok") else 2
+
+
 def cmd_health(args: argparse.Namespace) -> int:
     cfg = load_settings()
     report = build_health_audit(cfg, official=args.official, persist=True)
@@ -844,6 +922,11 @@ def main() -> int:
     outcome_rep = sub.add_parser("outcome-report", help="汇总当前收益追踪结果")
     outcome_rep.add_argument("--detail", action="store_true")
     outcome_rep.set_defaults(func=cmd_outcome_report)
+
+    sentiment = sub.add_parser("sentiment-status", help="读取情绪推演项目，生成市场情绪周期状态")
+    sentiment.add_argument("--trade-date", default="", help="指定交易日 YYYY-MM-DD；默认使用当前快照交易日")
+    sentiment.add_argument("--persist", action="store_true", help="写入 V2.0 outputs/reports/sentiment_regime_*.json")
+    sentiment.set_defaults(func=cmd_sentiment_status)
 
     post_market = sub.add_parser("post-market-refresh", help="盘后刷新：追踪入库、收益回填、因子宽表、历史模式标签")
     post_market.add_argument("--all", action="store_true", help="回放全部 pipeline；默认只处理最新")

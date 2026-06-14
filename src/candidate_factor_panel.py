@@ -34,6 +34,15 @@ BASE_COLUMNS = [
     "diagnosis_badge",
     "diagnosis_risks",
     "risk_penalty",
+    "sentiment_date",
+    "sentiment_state",
+    "sentiment_state_group",
+    "sentiment_value",
+    "sentiment_position_multiplier",
+    "sentiment_tradeability_score",
+    "sentiment_score",
+    "sentiment_action",
+    "sentiment_reason",
     "p80_count",
     "p80_score",
     "lift_score",
@@ -90,6 +99,11 @@ def _risk_penalty(row: Dict[str, Any]) -> float:
         penalty += 0.20
     if safe_int(row.get("snapshot_discontinuous_count"), 0) > 0:
         penalty += 0.20
+    action = str(row.get("sentiment_action") or "")
+    if "降权" in action or "防兑现" in action:
+        penalty += 0.10
+    if row.get("sentiment_fresh_for_snapshot") is False:
+        penalty += 0.15
     return min(1.0, penalty)
 
 
@@ -107,6 +121,9 @@ def _notes(row: Dict[str, Any]) -> List[str]:
         notes.append("Lift较强")
     if row.get("boundary_risk"):
         notes.append("边界风险")
+    action = str(row.get("sentiment_action") or "")
+    if action:
+        notes.append("情绪:" + action)
     risks = row.get("diagnosis_risks") or []
     if risks:
         notes.append("诊断风险:" + ",".join(str(item) for item in risks[:3]))
@@ -120,13 +137,17 @@ def enrich_factor_row(record: Dict[str, Any]) -> Dict[str, Any]:
     diagnosis = max(0.0, min(1.0, safe_float(row.get("xgb_blended_score"), 0.0)))
     p80_score = min(1.0, safe_int(row.get("p80_count"), 0) / 5.0)
     lift_norm = min(1.0, max(0.0, safe_float(row.get("lift_score"), 0.0) / 3.0))
+    sentiment_score = safe_float(row.get("sentiment_tradeability_score"), 0.0)
+    if not row.get("sentiment_state"):
+        sentiment_score = 0.50
     risk = _risk_penalty(row)
     preliminary = (
-        0.30 * consensus
-        + 0.25 * diagnosis
-        + 0.20 * rank_strength
-        + 0.15 * p80_score
-        + 0.10 * lift_norm
+        0.27 * consensus
+        + 0.22 * diagnosis
+        + 0.18 * rank_strength
+        + 0.13 * p80_score
+        + 0.08 * lift_norm
+        + 0.12 * sentiment_score
         - 0.20 * risk
     )
     row.update(
@@ -136,6 +157,7 @@ def enrich_factor_row(record: Dict[str, Any]) -> Dict[str, Any]:
             "risk_penalty": round(risk, 4),
             "p80_score": round(p80_score, 4),
             "lift_score_norm": round(lift_norm, 4),
+            "sentiment_score": round(sentiment_score, 4),
             "preliminary_score": round(max(0.0, min(1.0, preliminary)), 4),
             "factor_notes": _notes(row),
         }

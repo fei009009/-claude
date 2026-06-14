@@ -13,6 +13,8 @@ from src.diagnosis.annotate import annotate_all
 from src.diagnosis.service import run_xgb_validation_layer
 from src.pipeline import build_overlap_analysis, run_all_strategies
 from src.quality_gate import audit_snapshot, format_quality_summary, quality_config, resolve_snapshot
+from src.sentiment_regime import build_sentiment_regime
+from src.sentiment_overlay import annotate_all_with_sentiment
 from src.tracking_store import ingest_pipeline_file
 from src.wecom_push import build_run_markdown, push_wecom
 from src.x1_preheat import latest_status as x1_preheat_status, run_preheat as run_x1_preheat, select_tail_snapshot
@@ -70,6 +72,7 @@ def _persist_pipeline(
         "boundary": cycle.get("boundary"),
         "diagnosis": cycle.get("diagnosis"),
         "diagnosis_results": cycle.get("diagnosis_results", []),
+        "sentiment": cycle.get("sentiment"),
         "x1_preheat": cycle.get("x1_preheat"),
     }
     path = _json_dir(cfg) / f"pipeline_v2_{datetime.now():%Y%m%d_%H%M%S}.json"
@@ -97,7 +100,20 @@ def tail_window_state(cfg: Dict[str, Any], now: Optional[datetime] = None) -> st
     return "during"
 
 
-def _run_cycle(snapshot_dir: Path, cfg: Dict[str, Any], label: str) -> Dict[str, Any]:
+def _trade_date_from_quality(quality: Dict[str, Any] | None) -> str:
+    quality = quality or {}
+    metrics = quality.get("metrics") or {}
+    meta = quality.get("meta") or {}
+    return str(
+        metrics.get("expected_trade_date")
+        or metrics.get("observed_trade_date")
+        or metrics.get("meta_trade_date")
+        or meta.get("trade_date")
+        or ""
+    )
+
+
+def _run_cycle(snapshot_dir: Path, cfg: Dict[str, Any], label: str, quality: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     global _FAILS
     max_fails = quality_config(cfg)["max_consecutive_failures"]
     _banner(f"{label} 开始")
@@ -179,6 +195,30 @@ def _run_cycle(snapshot_dir: Path, cfg: Dict[str, Any], label: str) -> Dict[str,
                 cycle["diagnosis_results"] = []
                 _emit(f"  XGB 诊断跳过: {exc}")
 
+        try:
+            sentiment_report = build_sentiment_regime(
+                cfg,
+                trade_date=_trade_date_from_quality(quality),
+                persist=True,
+            )
+            cycle["sentiment"] = sentiment_report
+            cycle["results"], cycle["overlap"] = annotate_all_with_sentiment(
+                cycle.get("results", []),
+                cycle.get("overlap", {}),
+                sentiment_report,
+            )
+            timing = sentiment_report.get("timing") or {}
+            freshness = sentiment_report.get("freshness") or {}
+            _emit(
+                "  情绪周期: "
+                f"{timing.get('state', '-')}({timing.get('value', 0)}) "
+                f"仓位系数={timing.get('position_multiplier', 1)} "
+                f"对齐={'OK' if freshness.get('ok_for_snapshot') else 'WARN'}"
+            )
+        except Exception as exc:
+            cycle["sentiment"] = {"ok": False, "error": str(exc)}
+            _emit(f"  情绪周期融合跳过: {exc}")
+
         _FAILS = 0 if cycle["ok"] else _FAILS + 1
         if not cycle["ok"]:
             _emit(f"  策略成功数不足，连续失败 {_FAILS}/{max_fails}")
@@ -227,7 +267,7 @@ def run_tail_once(cfg: Dict[str, Any], push: bool = True, label: str = "once") -
         _emit(f"阻断正式出票: {error}")
         return cycle
 
-    cycle = _run_cycle(snapshot_dir, cfg, label)
+    cycle = _run_cycle(snapshot_dir, cfg, label, quality)
     cycle["snapshot_source"] = source
     cycle["snapshot_dir"] = str(snapshot_dir)
     cycle["snapshot_quality"] = quality
@@ -250,6 +290,7 @@ def run_tail_once(cfg: Dict[str, Any], push: bool = True, label: str = "once") -
                 cycle.get("results", []),
                 cycle.get("overlap", {}),
                 diagnosis_results=cycle.get("diagnosis_results", []),
+                sentiment_report=cycle.get("sentiment"),
                 cfg=cfg,
                 label=label,
             )
@@ -315,6 +356,7 @@ def run_tail_watch(
                         cycle.get("results", []),
                         cycle.get("overlap", {}),
                         diagnosis_results=cycle.get("diagnosis_results", []),
+                        sentiment_report=cycle.get("sentiment"),
                         cfg=cfg,
                         label=f"{label} {now:%H:%M:%S}",
                     )
@@ -343,6 +385,7 @@ def run_tail_watch(
                 best_cycle.get("results", []),
                 best_cycle.get("overlap", {}),
                 diagnosis_results=best_cycle.get("diagnosis_results", []),
+                sentiment_report=best_cycle.get("sentiment"),
                 cfg=cfg,
                 label=f"汇总 {accepted}/{cycles} 轮通过",
             )

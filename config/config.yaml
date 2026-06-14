@@ -27,6 +27,7 @@ paths:
   reference_xgbzx_dir: D:\ZTFHQ\XGBZX
   reference_x1_dir: D:\ZTFHQ\X1
   reference_x1_xin_dir: D:\ZTFHQ\X1-XIN
+  reference_sentiment_dir: C:\Users\Administrator\Desktop\情绪推演\offline_sentiment_vip
 
 strategies:
   v10:

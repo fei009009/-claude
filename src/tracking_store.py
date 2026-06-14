@@ -174,6 +174,9 @@ def _make_record(
     rank_map = {_strategy_key(k): safe_int(v, 0) for k, v in (ranks or {}).items()}
     diag = _diag_from_row(base_row)
     quality = _quality_summary(pipeline)
+    sentiment = base_row.get("sentiment_context") or {}
+    if not sentiment:
+        sentiment = (pipeline.get("sentiment") or {}).get("timing") or {}
     boundary = boundary or {}
     trade_date = trade_date_from_pipeline(pipeline)
     event_id = f"{pipeline_file}|{selection_layer}|{code}"
@@ -202,6 +205,16 @@ def _make_record(
         "boundary_pct": safe_float(boundary.get("pct"), 0.0),
         "x1_preheat_usable": bool((pipeline.get("x1_preheat") or {}).get("usable")),
         "x1_preheat_completed": bool((pipeline.get("x1_preheat") or {}).get("completed")),
+        "sentiment_date": sentiment.get("date", ""),
+        "sentiment_state": sentiment.get("state", ""),
+        "sentiment_state_group": sentiment.get("state_group", ""),
+        "sentiment_value": safe_int(sentiment.get("value"), 0),
+        "sentiment_risk_appetite": sentiment.get("risk_appetite", ""),
+        "sentiment_position_multiplier": safe_float(sentiment.get("position_multiplier"), 1.0),
+        "sentiment_tradeability_score": safe_float(sentiment.get("tradeability_score"), 0.0),
+        "sentiment_action": sentiment.get("action", base_row.get("sentiment_action", "")),
+        "sentiment_reason": sentiment.get("reason", ""),
+        "sentiment_fresh_for_snapshot": bool(sentiment.get("fresh_for_snapshot", True)),
     }
     record.update(_row_features(base_row))
     record.update(diag)

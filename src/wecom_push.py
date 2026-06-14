@@ -10,6 +10,8 @@ try:
 except Exception:  # pragma: no cover - dependency may be absent in tests
     requests = None
 
+from src.sentiment_overlay import sentiment_summary
+
 
 XGB_CONFIRM_SIGNALS = {"STRONG_BUY", "BUY"}
 
@@ -46,6 +48,7 @@ def build_run_markdown(
     results: List[dict],
     overlap: dict,
     diagnosis_results: Optional[List[dict]] = None,
+    sentiment_report: Optional[dict] = None,
     cfg: Optional[dict] = None,
     test: bool = False,
     label: str = "",
@@ -64,6 +67,23 @@ def build_run_markdown(
         name = item.get("display_name", item.get("strategy_name", "?"))
         status = "OK" if item.get("ok") else "FAIL"
         lines.append(f"- {name}: {status} | 候选 {len(item.get('top', []))} | 耗时 {float(item.get('elapsed_seconds', 0) or 0):.1f}s")
+
+    sent = sentiment_summary(sentiment_report)
+    if sent.get("ok"):
+        align = "对齐" if sent.get("fresh_for_snapshot") else "需核对"
+        lines.append("")
+        lines.append(
+            f"**情绪周期**：{sent.get('date') or '-'} {sent.get('state') or '-'}"
+            f"({sent.get('value', 0)}) | 风险偏好 {sent.get('risk_appetite') or '-'} | "
+            f"仓位系数 {float(sent.get('position_multiplier') or 0):.2f} | {align}"
+        )
+        lines.append(
+            f"> 涨停 {sent.get('uplimit_num', 0)} / 跌停 {sent.get('downlimit_num', 0)} / "
+            f"炸板 {sent.get('fried_board_num', 0)}；{sent.get('tail_guidance') or ''}"
+        )
+    elif sentiment_report:
+        lines.append("")
+        lines.append("**情绪周期**：暂不可用，候选不做情绪降权。")
 
     xgb_by_code = _xgb_map(diagnosis_results)
     xgb_confirmed = {code for code, item in xgb_by_code.items() if item.get("signal") in XGB_CONFIRM_SIGNALS}
@@ -111,7 +131,9 @@ def build_run_markdown(
                     extra = f" WR={float(row['wr']):.0%}"
                 except Exception:
                     extra = f" WR={row['wr']}"
-            lines.append(f"{idx}. {row.get('code', '-')} {_short(row.get('name', ''), 8)} {_fmt_pct(row.get('pct_chg'))}{extra}")
+            env = row.get("sentiment_action")
+            env_text = f" | {env}" if env else ""
+            lines.append(f"{idx}. {row.get('code', '-')} {_short(row.get('name', ''), 8)} {_fmt_pct(row.get('pct_chg'))}{extra}{env_text}")
 
     risk_items = [item for item in (diagnosis_results or []) if item.get("risk_flags")]
     if risk_items:
@@ -123,6 +145,7 @@ def build_run_markdown(
     lines.append("")
     lines.append("---")
     lines.append("> XGB 仅作为诊断验证层，不参与四策略交集计数。")
+    lines.append("> 情绪周期仅作为市场环境、仓位系数和风险降权层，不作为第五个选股策略。")
     lines.append("> 自动化结果仅供复盘和投资参考，不构成任何买卖建议。")
 
     markdown = "\n".join(lines)
@@ -144,6 +167,13 @@ def _format_overlap_line(item: dict, xgb_by_code: Dict[str, dict], *, strong: bo
         except Exception:
             score_text = str(score)
         suffix = f" | XGB {score_text} {_signal_tag(str(diag.get('signal', '')))}"
+    sent = item.get("sentiment_context") or {}
+    if sent:
+        try:
+            env_score = f"{float(sent.get('tradeability_score') or 0):.2f}"
+        except Exception:
+            env_score = "-"
+        suffix += f" | 情绪 {sent.get('action') or '-'} {env_score}"
     lead = "- **" if strong else "- "
     tail = "**" if strong else ""
     return f"{lead}{code}{tail} {_short(item.get('name', ''), 8)} [{strategies}]{suffix}"

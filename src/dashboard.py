@@ -532,6 +532,7 @@ def _diagnosis_summary(pipeline: Dict[str, Any], name_map: Dict[str, str]) -> Op
 def _v2_status() -> Dict[str, Any]:
     from src.evolution_status import build_evolution_status
     from src.quality_gate import resolve_snapshot
+    from src.sentiment_regime import build_sentiment_regime
     from src.settings import load_settings
     from src.x1_preheat import latest_status as x1_preheat_status
 
@@ -603,6 +604,7 @@ def _v2_status() -> Dict[str, Any]:
         "x1_preheat": x1_status,
         "tracking": _tracking_status(cfg),
         "evolution": build_evolution_status(cfg),
+        "sentiment": build_sentiment_regime(cfg),
         "health": _health_status(cfg),
         "latest_run": None,
         "boundary": None,
@@ -610,6 +612,9 @@ def _v2_status() -> Dict[str, Any]:
 
     if not pipeline:
         return status
+
+    if pipeline.get("sentiment"):
+        status["sentiment"] = pipeline.get("sentiment") or status["sentiment"]
 
     name_snapshot_dir = pipeline_snapshot if pipeline_snapshot.exists() else snapshot_dir
     name_map = _build_name_map(name_snapshot_dir, pipeline)
@@ -639,6 +644,11 @@ def _v2_status() -> Dict[str, Any]:
                     "diagnosis_badge": row.get("diagnosis_badge", ""),
                     "diagnosis_compact": row.get("diagnosis_compact", ""),
                     "diagnosis": row.get("diagnosis"),
+                    "sentiment_badge": row.get("sentiment_badge", ""),
+                    "sentiment_compact": row.get("sentiment_compact", ""),
+                    "sentiment_action": row.get("sentiment_action", ""),
+                    "sentiment_context": row.get("sentiment_context"),
+                    "sentiment_tradeability_score": row.get("sentiment_tradeability_score"),
                 }
                 for idx, row in enumerate(top[:10])
             ],
@@ -657,6 +667,11 @@ def _v2_status() -> Dict[str, Any]:
             "diagnosis_compact": item.get("diagnosis_compact", ""),
             "diagnosis": item.get("diagnosis"),
             "xgb_confirmed": item.get("xgb_confirmed", False),
+            "sentiment_badge": item.get("sentiment_badge", ""),
+            "sentiment_compact": item.get("sentiment_compact", ""),
+            "sentiment_action": item.get("sentiment_action", ""),
+            "sentiment_context": item.get("sentiment_context"),
+            "sentiment_tradeability_score": item.get("sentiment_tradeability_score"),
         })
 
     boundary = pipeline.get("boundary")
@@ -827,6 +842,10 @@ class Handler(BaseHTTPRequestHandler):
             from src.evolution_status import build_evolution_status
             from src.settings import load_settings
             self._json(build_evolution_status(load_settings()))
+        elif path == "/api/sentiment":
+            from src.sentiment_regime import build_sentiment_regime
+            from src.settings import load_settings
+            self._json(build_sentiment_regime(load_settings(), persist=False))
         elif path == "/api/history":
             n = int(query.get("n", [10])[0])
             self._json({"pipelines": _load_recent_pipelines(n), "tails": _load_latest_tails(n)})
@@ -857,6 +876,7 @@ class Handler(BaseHTTPRequestHandler):
             "pattern-tags",
             "outcome-update",
             "post-market-refresh",
+            "sentiment-status",
         }
         if cmd not in allowed:
             self._json({"ok": False, "error": f"unknown command: {cmd}"}, code=400)

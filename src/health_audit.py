@@ -9,6 +9,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from src.common import norm_code, safe_int
 from src.quality_gate import audit_snapshot, resolve_snapshot
+from src.sentiment_regime import build_sentiment_regime
 from src.tracking_outcomes import load_current_outcomes
 from src.tracking_store import build_candidate_records, json_dir, load_tracking_records, output_root
 from src.x1_preheat import latest_status as x1_preheat_status
@@ -100,6 +101,7 @@ def build_health_audit(
     strategy_snapshot = pipeline_snapshot if pipeline_snapshot.exists() else active_snapshot
     strategy_report = _audit_strategies(cfg, pipeline, strategy_snapshot, trade_date, add)
     xgb_report = _audit_xgb(pipeline, trade_date, strategy_report.get("union_codes", set()), add)
+    sentiment_report = _audit_sentiment(cfg, trade_date, pipeline, add)
     x1_report = _audit_x1(cfg, active_snapshot, pipeline, add)
     tracking_report = _audit_tracking(cfg, pipeline, pipeline_path, add)
     step_report = _audit_required_steps(pipeline, add)
@@ -109,8 +111,9 @@ def build_health_audit(
         quality,
         {
             "strategies": strategy_report,
-            "xgb": xgb_report,
-            "x1beam": x1_report,
+        "xgb": xgb_report,
+        "sentiment": sentiment_report,
+        "x1beam": x1_report,
             "tracking": tracking_report,
             "steps": step_report,
         },
@@ -431,6 +434,66 @@ def _audit_x1(cfg: Dict[str, Any], snapshot_dir: Path, pipeline: Dict[str, Any],
         warning=not bool(x1_result.get("ok")),
     )
     return status
+
+
+def _audit_sentiment(cfg: Dict[str, Any], trade_date: str, pipeline: Dict[str, Any], add) -> Dict[str, Any]:
+    report = build_sentiment_regime(cfg, trade_date=trade_date)
+    freshness = report.get("freshness") or {}
+    timing = report.get("timing") or {}
+    sentiment = report.get("sentiment") or {}
+    ok = bool(report.get("ok")) and bool(freshness.get("ok_for_snapshot"))
+    detail = (
+        f"{timing.get('date', '-')} {timing.get('state', '-')}({timing.get('value', 0)}) "
+        f"仓位系数={timing.get('position_multiplier', 0)} | "
+        f"涨停={sentiment.get('uplimit_num', 0)} 炸板={sentiment.get('fried_board_num', 0)} "
+        f"封板率={safe_int(safe_float_percent(sentiment.get('seal_rate')), 0)}% | "
+        f"timing={freshness.get('timing_date', '-')} sentiment={freshness.get('sentiment_date', '-')}"
+    )
+    if report.get("missing"):
+        detail += f" | 缺失={len(report.get('missing') or [])}"
+    add(
+        "sentiment",
+        "情绪周期融合",
+        ok,
+        detail,
+        warning=not ok,
+        data={
+            "timing": timing,
+            "sentiment": sentiment,
+            "freshness": freshness,
+            "missing": report.get("missing", []),
+        },
+    )
+    pipeline_sentiment = pipeline.get("sentiment") or {}
+    overlay_count = _sentiment_overlay_count(pipeline)
+    add(
+        "sentiment",
+        "候选级情绪注解",
+        bool(pipeline_sentiment) and overlay_count > 0,
+        f"pipeline_sentiment={bool(pipeline_sentiment)} overlay_rows={overlay_count}",
+        warning=True,
+        data={"pipeline_sentiment_ok": bool(pipeline_sentiment), "overlay_rows": overlay_count},
+    )
+    return report
+
+
+def _sentiment_overlay_count(pipeline: Dict[str, Any]) -> int:
+    count = 0
+    for result in pipeline.get("strategies") or []:
+        for row in result.get("top") or []:
+            if row.get("sentiment_context") or row.get("sentiment_action"):
+                count += 1
+    for row in (pipeline.get("overlap") or {}).get("overlaps") or []:
+        if row.get("sentiment_context") or row.get("sentiment_action"):
+            count += 1
+    return count
+
+
+def safe_float_percent(value: Any) -> float:
+    try:
+        return float(value or 0) * 100
+    except Exception:
+        return 0.0
 
 
 def _audit_tracking(cfg: Dict[str, Any], pipeline: Dict[str, Any], pipeline_path: Optional[Path], add) -> Dict[str, Any]:

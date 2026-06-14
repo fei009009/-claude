@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from src.quality_gate import audit_snapshot, format_quality_summary, quality_config, resolve_snapshot
+from src.sentiment_regime import build_sentiment_regime
 from src.x1_preheat import select_tail_snapshot
 
 
@@ -44,6 +45,7 @@ def audit(cfg: Dict[str, Any], probe: bool = False) -> Dict[str, Any]:
     for blocker in quality.get("blockers", [])[:5]:
         add("快照阻断项", False, blocker)
     _check_native_primary_source(add, cfg, quality)
+    _check_sentiment(add, cfg, quality)
 
     vip = Path(str(paths.get("vip_screener_dir", "")))
     legacy = Path(str(paths.get("legacy_screener_dir", "")))
@@ -213,6 +215,28 @@ def _check_native_primary_source(add, cfg: Dict[str, Any], quality: Dict[str, An
             f"期望 {expected}，实际 {actual or '未记录'}；正式出票需先重建/提升快照",
             warning=not require_expected,
         )
+
+
+def _check_sentiment(add, cfg: Dict[str, Any], quality: Dict[str, Any]) -> None:
+    metrics = quality.get("metrics") or {}
+    meta = quality.get("meta") or {}
+    trade_date = str(
+        metrics.get("expected_trade_date")
+        or metrics.get("observed_trade_date")
+        or metrics.get("meta_trade_date")
+        or meta.get("trade_date")
+        or ""
+    )
+    report = build_sentiment_regime(cfg, trade_date=trade_date)
+    timing = report.get("timing") or {}
+    freshness = report.get("freshness") or {}
+    ok = bool(report.get("ok")) and bool(freshness.get("ok_for_snapshot"))
+    detail = (
+        f"{timing.get('date', '-')} {timing.get('state', '-')}({timing.get('value', 0)}) | "
+        f"仓位系数={timing.get('position_multiplier', 1)} | "
+        f"timing={freshness.get('timing_date', '-')} sentiment={freshness.get('sentiment_date', '-')}"
+    )
+    add("情绪周期数据", ok, detail, warning=True)
 
 
 def _wecom_channels(cfg: Dict[str, Any]) -> tuple[bool, int]:
