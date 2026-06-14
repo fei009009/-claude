@@ -72,6 +72,26 @@ diagnosis:
   independent_strategy: false
   calibration_status: observation_until_full_backtest_refresh
 
+snapshot:
+  native:
+    enabled: true
+    snapshot_root: D:\ZTFHQ\分仓之神V2.0\outputs\cache\native_snapshots
+    primary_source: tushare_rt_k
+    validation_sources:
+      - zzshare
+      - eltdx
+      - sina_direct
+      - tencent_direct
+    fetch_hard_deadline_seconds: 180
+    build_deadline_seconds: 360
+    online_history_seed_refresh_limit: 0
+    min_source_rows: 4500
+    min_healthy_sources: 2
+    max_price_mismatch: 20
+    require_tushare_primary: false
+    max_halt_gap_days: 4
+    promote_only_after_quality_pass: true
+
 automation:
   tail:
     start_time: "14:50:00"

@@ -28,6 +28,7 @@ config/.env.*
 
 # Outputs & cache
 outputs/
+cache/
 *.log
 *.tmp
 

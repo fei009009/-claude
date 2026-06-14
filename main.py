@@ -18,6 +18,7 @@ from src.diagnosis.xgb_calibration import build_xgb_calibration_status
 from src.candidate_factor_panel import build_candidate_factor_panel
 from src.health_audit import build_health_audit
 from src.historical_pattern_tags import build_historical_pattern_tags
+from src.native_snapshot import build_native_snapshot, promote_latest_native_snapshot
 from src.pipeline import build_overlap_analysis, run_all_strategies
 from src.quality_gate import audit_snapshot, format_quality_summary, resolve_snapshot
 from src.settings import ensure_output_dirs, load_settings
@@ -394,6 +395,59 @@ def cmd_snapshot_prepare(args: argparse.Namespace) -> int:
     return 0 if report.get("ok") else 2
 
 
+def cmd_native_snapshot(args: argparse.Namespace) -> int:
+    cfg = load_settings()
+    ensure_output_dirs(cfg)
+    report = build_native_snapshot(
+        cfg,
+        promote=args.promote,
+        allow_single_source=args.allow_single_source,
+        official=args.official,
+        timeout=args.timeout,
+        force_promote=args.force_promote,
+    )
+    print(f"V2.0 原生多源快照: {'OK' if report.get('ok') else 'FAIL'}")
+    print(f"快照: {report.get('snapshot_dir') or '-'}")
+    print(f"质量: {report.get('quality_summary') or '-'}")
+    bridge = report.get("bridge_report") or {}
+    print(
+        f"生成={bridge.get('created_files', 0)} "
+        f"复用={bridge.get('reused_files', 0)} "
+        f"跳过={bridge.get('skipped_files', 0)} "
+        f"交易日={bridge.get('trade_date') or '-'}"
+    )
+    sources = report.get("sources") or []
+    if sources:
+        print("数据源:")
+        for item in sources:
+            status = "OK" if item.get("ok") else "FAIL"
+            print(f"  - {item.get('source')}: {status}, rows={item.get('rows', 0)}, error={item.get('error', '')}")
+    promoted = report.get("promoted") or {}
+    if args.promote:
+        print(f"提升live: {'OK' if promoted.get('ok') else 'FAIL'} | {promoted.get('target_dir') or promoted.get('reason') or ''}")
+    if report.get("report_path"):
+        print(f"报告: {report['report_path']}")
+    return 0 if report.get("ok") else 2
+
+
+def cmd_native_promote(args: argparse.Namespace) -> int:
+    cfg = load_settings()
+    ensure_output_dirs(cfg)
+    report = promote_latest_native_snapshot(cfg, force=args.force)
+    print(f"提升最近原生快照: {'OK' if report.get('ok') else 'FAIL'}")
+    print(f"来源报告: {report.get('report_path') or '-'}")
+    print(f"来源快照: {report.get('snapshot_dir') or '-'}")
+    quality = report.get("quality") or {}
+    if quality:
+        print(f"质量: {format_quality_summary(quality)}")
+    promoted = report.get("promoted") or {}
+    if promoted:
+        print(f"目标: {promoted.get('target_dir') or '-'}")
+    if report.get("reason"):
+        print(f"原因: {report.get('reason')}")
+    return 0 if report.get("ok") else 2
+
+
 def cmd_pre_tail_prep(args: argparse.Namespace) -> int:
     cfg = load_settings()
     ensure_output_dirs(cfg)
@@ -714,6 +768,18 @@ def main() -> int:
     snapshot_prepare.add_argument("--source", help="指定上游快照目录；默认按配置候选自动选择")
     snapshot_prepare.add_argument("--force", action="store_true", help="导入后质检不通过时仍保留，仅用于排查")
     snapshot_prepare.set_defaults(func=cmd_snapshot_prepare)
+
+    native_snapshot = sub.add_parser("native-snapshot", help="V2.0 原生多源构建快照：tushare_rt_k 主源，多源校验补齐")
+    native_snapshot.add_argument("--promote", action="store_true", help="质检通过后提升为 V2.0 live current 快照")
+    native_snapshot.add_argument("--official", action="store_true", help="按正式尾盘口径要求快照交易日等于今天")
+    native_snapshot.add_argument("--allow-single-source", action="store_true", help="仅排查用：允许单源通过上游校验")
+    native_snapshot.add_argument("--force-promote", action="store_true", help="仅排查用：质检失败也尝试提升")
+    native_snapshot.add_argument("--timeout", type=int, default=900)
+    native_snapshot.set_defaults(func=cmd_native_snapshot)
+
+    native_promote = sub.add_parser("native-promote", help="把最近一次 OK 的 V2.0 原生快照提升为 live current")
+    native_promote.add_argument("--force", action="store_true", help="仅排查用：质检失败仍尝试提升")
+    native_promote.set_defaults(func=cmd_native_promote)
 
     pre_tail = sub.add_parser("pre-tail-prep", help="尾盘前准备：V2快照 + 正式质检 + X1Beam预热 + 健康审计")
     pre_tail.add_argument("--source", help="指定上游快照目录；默认按配置候选自动选择")
