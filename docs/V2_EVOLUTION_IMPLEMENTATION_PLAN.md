@@ -561,3 +561,22 @@ V2.0 进化成功，不是看功能多少，而是看是否能回答这些问题
 10. 任何一次推送是否能完整回放决策链？
 
 只要这些问题能稳定回答，分仓之神就从“出票工具”进化成了“可学习、可复盘、可自我改进的短线决策系统”。
+
+---
+
+## 九、30天量化前沿计划吸收
+
+用户补充的“30天量化前沿学习计划”已经整理为路线图补充文档：
+
+```text
+docs/QUANT_FRONTIER_30DAY_INTEGRATION.md
+```
+
+吸收原则：
+
+1. 采纳“先验证、再调权、再上深度模型”的顺序。
+2. 近期优先补 `factor_eval.py`、`walk_forward.py`、`overfitting_bridge.py`、`tradeability_filter.py`、`concept_exposure.py`、`failure_cases.py`、`triple_barrier.py`、`meta_labeling.py`。
+3. Transformer、GNN、LLM 反方审查、自适应权重只作为中后期增强，不进入 14:50-14:57 尾盘实时链路。
+4. 尾盘红线保持不变：不重训模型、不跑 LLM、不临时全量 X1Beam、不让质量闸门失败的数据正式出票。
+
+这份补充计划的核心价值，是把 V2.0 后续升级从“堆功能”改成“可验证、可复盘、可防过拟合”的执行路线。
