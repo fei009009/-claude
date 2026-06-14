@@ -33,6 +33,7 @@ def audit(cfg: Dict[str, Any], probe: bool = False) -> Dict[str, Any]:
         "快照质量闸门",
         bool(quality.get("ok")),
         f"{format_quality_summary(quality)} | 来源={snapshot_source} | {snapshot_dir}",
+        warning=not bool(quality.get("ok")),
     )
     if active_snapshot_dir.resolve() != snapshot_dir.resolve():
         add(
@@ -67,14 +68,15 @@ def audit(cfg: Dict[str, Any], probe: bool = False) -> Dict[str, Any]:
         x1 / "beam_core.py",
         x1 / "cache" / "beam_merged.json",
     ])
-    _check_x1beam_cache(add, cfg, snapshot_dir)
     if preheat_status.get("usable"):
+        _check_x1beam_cache(add, cfg, snapshot_dir, preheat_status)
         add(
             "X1Beam manifest",
             True,
             f"完整预热可用 | {preheat_status.get('trade_date', '')} | Top={preheat_status.get('top_count', 0)} | {preheat_status.get('cache_path', '')}",
         )
     else:
+        _check_x1beam_cache(add, cfg, snapshot_dir, preheat_status)
         add(
             "X1Beam manifest",
             False,
@@ -151,7 +153,15 @@ def build_push_markdown(report: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _check_x1beam_cache(add, cfg: Dict[str, Any], snapshot_dir: Path) -> None:
+def _check_x1beam_cache(add, cfg: Dict[str, Any], snapshot_dir: Path, preheat_status: Dict[str, Any]) -> None:
+    if not preheat_status.get("usable"):
+        detail = (
+            f"completed={preheat_status.get('completed')} cache={preheat_status.get('cache_exists')} "
+            f"match={preheat_status.get('matches_current_snapshot')} top={preheat_status.get('top_count', 0)} "
+            f"{preheat_status.get('reason') or preheat_status.get('error', '')}"
+        )
+        add("X1Beam 预热缓存", False, detail, warning=True)
+        return
     cache_dir = Path(str(cfg.get("paths", {}).get("output_root", "outputs"))) / "cache" / "x1beam_fast"
     files = sorted(cache_dir.glob("x1beam_fast_*.json"), key=lambda p: p.stat().st_mtime, reverse=True) if cache_dir.exists() else []
     if not files:

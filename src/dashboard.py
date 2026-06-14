@@ -351,15 +351,78 @@ def _tracking_status(cfg: Dict[str, Any]) -> Dict[str, Any]:
         return {"error": str(exc), "latest_factor_panel": _latest_factor_panel(), "latest_pattern_tags": _latest_pattern_tags()}
 
 
+def _snapshot_quality_fast(snapshot_dir: Path, cfg: Dict[str, Any]) -> Dict[str, Any]:
+    from src.quality_gate import load_snapshot_meta, quality_config
+
+    files = list(Path(snapshot_dir).glob("*.txt")) if Path(snapshot_dir).exists() else []
+    meta = load_snapshot_meta(Path(snapshot_dir))
+    validation = meta.get("validation") or {}
+    summary = validation.get("summary") or {}
+    continuity = summary.get("history_continuity") or {}
+    empty_files = 0
+    for path in files:
+        try:
+            if path.stat().st_size < 50:
+                empty_files += 1
+        except OSError:
+            empty_files += 1
+    file_count = len(files)
+    discontinuous = int(continuity.get("failed") or 0)
+    zero_close = int(summary.get("zero_close_count") or meta.get("zero_close_count") or 0)
+    q = quality_config(cfg)
+    blockers = []
+    if file_count < q["min_snapshot_files"]:
+        blockers.append(f"快照文件不足: {file_count} < {q['min_snapshot_files']}")
+    if file_count and empty_files / max(file_count, 1) > q["max_empty_ratio"]:
+        blockers.append(f"空文件率过高: {empty_files}/{file_count}")
+    if zero_close > q["max_zero_close_rows"]:
+        blockers.append(f"尾行零收盘价: {zero_close} 只，不能进入正式出票")
+    if discontinuous / max(file_count, 1) > q["max_discontinuous_ratio"]:
+        blockers.append(f"最近交易日不连续过多: {discontinuous}/{file_count}")
+    metrics = {
+        "snapshot_dir": str(snapshot_dir),
+        "file_count": file_count,
+        "empty_files": empty_files,
+        "empty_ratio": round(empty_files / max(file_count, 1), 6),
+        "checked_files": int(continuity.get("checked") or file_count),
+        "meta_trade_date": meta.get("trade_date", ""),
+        "observed_trade_date": meta.get("trade_date", ""),
+        "expected_trade_date": meta.get("trade_date", ""),
+        "stale_count": 0,
+        "missing_previous_count": int(continuity.get("missing") or 0),
+        "discontinuous_count": discontinuous,
+        "zero_close_count": zero_close,
+    }
+    return {
+        "ok": not blockers,
+        "status": "pass" if not blockers else "blocked",
+        "blocking": len(blockers),
+        "blockers": blockers,
+        "warnings": [],
+        "samples": {},
+        "metrics": metrics,
+        "meta": meta,
+    }
+
+
 def _health_status(cfg: Dict[str, Any]) -> Dict[str, Any]:
     now_ts = time.time()
     if _health_cache.get("report") is not None and float(_health_cache.get("expires", 0) or 0) > now_ts:
         return dict(_health_cache.get("report") or {})
-    try:
-        from src.health_audit import build_health_audit
+    compact = _latest_health_report()
+    _health_cache.update({"expires": now_ts + 60, "report": compact})
+    return compact
 
-        report = build_health_audit(cfg, official=False, persist=False)
-        compact = {
+
+def _latest_health_report() -> Dict[str, Any]:
+    report_dir = ROOT / "outputs" / "reports"
+    files = sorted(report_dir.glob("health_audit_*.json"), key=lambda p: p.stat().st_mtime, reverse=True) if report_dir.exists() else []
+    if not files:
+        return {"status": "unknown", "blocking": 0, "warnings": 0, "checks": [], "sections": {}, "pipeline_file": ""}
+    path = files[0]
+    try:
+        report = _load_json(path) or {}
+        return {
             "generated_at": report.get("generated_at", ""),
             "status": report.get("status", ""),
             "blocking": report.get("blocking", 0),
@@ -367,11 +430,10 @@ def _health_status(cfg: Dict[str, Any]) -> Dict[str, Any]:
             "pipeline_file": report.get("pipeline_file", ""),
             "checks": report.get("checks", [])[:40],
             "sections": report.get("sections", {}),
+            "report_path": str(path),
         }
     except Exception as exc:
-        compact = {"status": "error", "blocking": 1, "warnings": 0, "error": str(exc), "checks": []}
-    _health_cache.update({"expires": now_ts + 60, "report": compact})
-    return compact
+        return {"status": "error", "blocking": 1, "warnings": 0, "error": str(exc), "checks": []}
 
 
 def _load_latest_tails(n: int = 10) -> list[Dict[str, Any]]:
@@ -468,20 +530,14 @@ def _diagnosis_summary(pipeline: Dict[str, Any], name_map: Dict[str, str]) -> Op
 
 
 def _v2_status() -> Dict[str, Any]:
-    from src.quality_gate import audit_snapshot, resolve_snapshot
+    from src.quality_gate import resolve_snapshot
     from src.settings import load_settings
     from src.x1_preheat import latest_status as x1_preheat_status
 
     cfg = load_settings()
-    active_snapshot_dir, active_source = resolve_snapshot(cfg)
+    snapshot_dir, source = resolve_snapshot(cfg)
+    active_snapshot_dir, active_source = snapshot_dir, source
     pipeline = _load_latest_pipeline()
-    pipeline_snapshot = Path(str((pipeline or {}).get("snapshot_dir") or ""))
-    if pipeline and pipeline_snapshot.exists():
-        snapshot_dir = pipeline_snapshot
-        source = "latest_pipeline.snapshot_dir"
-    else:
-        snapshot_dir = active_snapshot_dir
-        source = active_source
     now_ts = time.time()
     cache_hit = (
         _quality_cache.get("quality") is not None
@@ -491,7 +547,7 @@ def _v2_status() -> Dict[str, Any]:
     if cache_hit:
         quality = _quality_cache["quality"]
     else:
-        quality = audit_snapshot(snapshot_dir, cfg, official=False)
+        quality = _snapshot_quality_fast(snapshot_dir, cfg)
         _quality_cache.update({
             "expires": now_ts + 60,
             "snapshot_dir": str(snapshot_dir),
@@ -509,10 +565,11 @@ def _v2_status() -> Dict[str, Any]:
     x1_status["fresh_for_tail"] = fresh
     x1_status["effective_usable_for_tail"] = bool(x1_status.get("usable")) and fresh
     active_snapshot_mismatch = False
+    pipeline_snapshot = Path(str((pipeline or {}).get("snapshot_dir") or ""))
     try:
-        active_snapshot_mismatch = active_snapshot_dir.resolve() != snapshot_dir.resolve()
+        active_snapshot_mismatch = bool(pipeline and pipeline_snapshot.exists() and active_snapshot_dir.resolve() != pipeline_snapshot.resolve())
     except Exception:
-        active_snapshot_mismatch = str(active_snapshot_dir) != str(snapshot_dir)
+        active_snapshot_mismatch = bool(pipeline and str(active_snapshot_dir) != str(pipeline_snapshot))
 
     status: Dict[str, Any] = {
         "timestamp": datetime.now().isoformat(timespec="seconds"),
@@ -544,7 +601,8 @@ def _v2_status() -> Dict[str, Any]:
     if not pipeline:
         return status
 
-    name_map = _build_name_map(snapshot_dir, pipeline)
+    name_snapshot_dir = pipeline_snapshot if pipeline_snapshot.exists() else snapshot_dir
+    name_map = _build_name_map(name_snapshot_dir, pipeline)
     summary = pipeline.get("summary", {})
     strategies = []
     for result in pipeline.get("strategies", []):
@@ -774,6 +832,8 @@ class Handler(BaseHTTPRequestHandler):
             "tail-once",
             "tail-watch",
             "quality",
+            "snapshot-prepare",
+            "pre-tail-prep",
             "test-push",
             "run",
             "x1-preheat",
@@ -781,6 +841,7 @@ class Handler(BaseHTTPRequestHandler):
             "factor-panel",
             "pattern-tags",
             "outcome-update",
+            "post-market-refresh",
         }
         if cmd not in allowed:
             self._json({"ok": False, "error": f"unknown command: {cmd}"}, code=400)

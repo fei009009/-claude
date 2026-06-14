@@ -7,7 +7,9 @@ paths:
   # V2.0 only writes under this project. External projects remain read-only references.
   project_root: D:\ZTFHQ\分仓之神V2.0
   output_root: D:\ZTFHQ\分仓之神V2.0\outputs
-  snapshot_root: D:\ZTFHQ\分仓之神\outputs\cache\tail_work_snapshots\work
+  snapshot_root: D:\ZTFHQ\分仓之神V2.0\outputs\cache\live_snapshots\current
+  v2_live_snapshot_root: D:\ZTFHQ\分仓之神V2.0\outputs\cache\live_snapshots
+  reference_tail_work_snapshot: D:\ZTFHQ\分仓之神\outputs\cache\tail_work_snapshots\work
   v1_snapshot: D:\ZTFHQ\分仓之神\snapshots
   v1_work: D:\ZTFHQ\分仓之神\outputs\cache\tail_work_snapshots\work
 

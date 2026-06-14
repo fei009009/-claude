@@ -26,9 +26,7 @@ def build_health_audit(
     active_snapshot, snapshot_source = resolve_snapshot(cfg)
     pipeline_path, pipeline = _latest_pipeline(cfg)
     pipeline_snapshot = Path(str(pipeline.get("snapshot_dir") or active_snapshot)) if pipeline else active_snapshot
-    audit_snapshot_dir = pipeline_snapshot if pipeline_snapshot.exists() else active_snapshot
-    audit_snapshot_source = "latest_pipeline.snapshot_dir" if pipeline and pipeline_snapshot.exists() else snapshot_source
-    quality = audit_snapshot(audit_snapshot_dir, cfg, official=official)
+    quality = audit_snapshot(active_snapshot, cfg, official=official)
     trade_date = _pipeline_trade_date(pipeline) or _quality_trade_date(quality)
 
     checks: List[Dict[str, Any]] = []
@@ -47,15 +45,19 @@ def build_health_audit(
         "snapshot",
         "快照质量",
         bool(quality.get("ok")),
-        _quality_detail(quality, audit_snapshot_source, audit_snapshot_dir),
+        _quality_detail(quality, snapshot_source, active_snapshot),
         data=quality.get("metrics") or {},
     )
     if pipeline and active_snapshot.resolve() != pipeline_snapshot.resolve():
+        pipeline_quality = audit_snapshot(pipeline_snapshot, cfg, official=False) if pipeline_snapshot.exists() else {}
         add(
             "snapshot",
             "活动快照与最新运行快照",
             False,
-            f"活动={active_snapshot} ({snapshot_source}) | 最新运行={pipeline_snapshot}",
+            (
+                f"活动={active_snapshot} ({snapshot_source}) | 最新运行={pipeline_snapshot} | "
+                f"最新运行质检={format_pipeline_quality(pipeline_quality)}"
+            ),
             warning=True,
             data={
                 "active_snapshot_dir": str(active_snapshot),
@@ -77,9 +79,10 @@ def build_health_audit(
         data={"pipeline": str(pipeline_path), "snapshot_dir": str(pipeline_snapshot)},
     )
 
-    strategy_report = _audit_strategies(cfg, pipeline, audit_snapshot_dir, trade_date, add)
+    strategy_snapshot = pipeline_snapshot if pipeline_snapshot.exists() else active_snapshot
+    strategy_report = _audit_strategies(cfg, pipeline, strategy_snapshot, trade_date, add)
     xgb_report = _audit_xgb(pipeline, trade_date, strategy_report.get("union_codes", set()), add)
-    x1_report = _audit_x1(cfg, audit_snapshot_dir, pipeline, add)
+    x1_report = _audit_x1(cfg, active_snapshot, pipeline, add)
     tracking_report = _audit_tracking(cfg, pipeline, pipeline_path, add)
     step_report = _audit_required_steps(pipeline, add)
 
@@ -169,6 +172,17 @@ def _quality_detail(quality: Dict[str, Any], source: str, snapshot_dir: Path) ->
         f"files={metrics.get('file_count', 0)} empty={metrics.get('empty_files', 0)} "
         f"date={metrics.get('expected_trade_date', '')} discontinuous={metrics.get('discontinuous_count', 0)} "
         f"zero={metrics.get('zero_close_count', 0)} | {snapshot_dir}"
+    )
+
+
+def format_pipeline_quality(quality: Dict[str, Any]) -> str:
+    if not quality:
+        return "missing"
+    metrics = quality.get("metrics") or {}
+    return (
+        f"{'通过' if quality.get('ok') else '阻断'} "
+        f"files={metrics.get('file_count', 0)} date={metrics.get('expected_trade_date', '')} "
+        f"discontinuous={metrics.get('discontinuous_count', 0)} zero={metrics.get('zero_close_count', 0)}"
     )
 
 

@@ -21,13 +21,14 @@ from src.historical_pattern_tags import build_historical_pattern_tags
 from src.pipeline import build_overlap_analysis, run_all_strategies
 from src.quality_gate import audit_snapshot, format_quality_summary, resolve_snapshot
 from src.settings import ensure_output_dirs, load_settings
+from src.snapshot_manager import live_current_dir, prepare_live_snapshot
 from src.tail_automation import run_tail_once, run_tail_watch
 from src.tail_readiness import audit as tail_readiness_audit
 from src.tail_readiness import build_push_markdown as build_readiness_md
 from src.tracking_outcomes import outcome_report, update_outcomes
 from src.tracking_store import ingest_pipeline_file, ingest_pipelines, summarize_tracking
 from src.wecom_push import build_run_markdown, push_test_markdown, push_wecom
-from src.x1_preheat import latest_status as x1_preheat_status, select_tail_snapshot
+from src.x1_preheat import latest_status as x1_preheat_status, run_preheat as run_x1_preheat, select_tail_snapshot
 
 
 STRATEGY_PRECHECKS = [
@@ -376,15 +377,111 @@ def cmd_snapshot(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_snapshot_prepare(args: argparse.Namespace) -> int:
+    cfg = load_settings()
+    ensure_output_dirs(cfg)
+    report = prepare_live_snapshot(
+        cfg,
+        source=Path(args.source) if args.source else None,
+        force=args.force,
+    )
+    print(f"V2.0 快照准备: {'OK' if report.get('ok') else 'FAIL'}")
+    print(f"来源: {report.get('source_label')} | {report.get('source_dir')}")
+    print(f"目标: {report.get('target_dir')}")
+    print(f"质量: {report.get('quality_summary') or report.get('error', '')}")
+    if report.get("report_path"):
+        print(f"报告: {report['report_path']}")
+    return 0 if report.get("ok") else 2
+
+
+def cmd_pre_tail_prep(args: argparse.Namespace) -> int:
+    cfg = load_settings()
+    ensure_output_dirs(cfg)
+    _banner("盘前/盘中快照准备")
+    prep = prepare_live_snapshot(
+        cfg,
+        source=Path(args.source) if args.source else None,
+        force=args.force,
+    )
+    print(f"快照准备: {'OK' if prep.get('ok') else 'FAIL'} | {prep.get('quality_summary') or prep.get('error', '')}")
+    if not prep.get("ok"):
+        return 2
+
+    snapshot_dir = live_current_dir(cfg)
+    quality = audit_snapshot(snapshot_dir, cfg, official=not args.allow_stale)
+    print(f"正式质量闸门: {format_quality_summary(quality)}")
+    for blocker in quality.get("blockers", []):
+        print(f"  阻断: {blocker}")
+    if not quality.get("ok") and not args.force:
+        print("快照未达到正式尾盘条件，停止 X1Beam 预热。")
+        return 2
+
+    if not args.skip_x1:
+        _banner("X1Beam 预热")
+        x1_cfg = (cfg.get("strategies") or {}).get("x1beam", {})
+        preheat_cfg = x1_cfg.get("preheat") or {}
+        manifest = run_x1_preheat(
+            cfg,
+            snapshot=snapshot_dir,
+            workers=args.workers or int(preheat_cfg.get("workers", x1_cfg.get("workers", 1))),
+            top_n=int(x1_cfg.get("top_n", 10)),
+            keep_per_tier=int(preheat_cfg.get("keep_per_tier", 80)),
+            timeout=args.timeout or int(preheat_cfg.get("timeout_seconds", 7200)),
+            time_budget=args.time_budget,
+            force=bool(args.force or args.allow_stale),
+            freeze=True,
+        )
+        print(f"X1Beam: completed={manifest.get('completed')} top={manifest.get('top_count', 0)} error={manifest.get('error', '')}")
+        if not manifest.get("completed") and not args.allow_x1_fail:
+            return 2
+
+    _banner("健康审计")
+    health = build_health_audit(cfg, official=not args.allow_stale, persist=True)
+    print(f"健康审计: {health.get('status')} | 阻断 {health.get('blocking', 0)} | 提醒 {health.get('warnings', 0)}")
+    print(f"报告: {health.get('report_path', '')}")
+    return 0 if health.get("blocking", 0) == 0 else 2
+
+
+def cmd_post_market_refresh(args: argparse.Namespace) -> int:
+    cfg = load_settings()
+    ensure_output_dirs(cfg)
+    latest = not args.all
+    _banner("盘后追踪入库")
+    tracking = ingest_pipelines(cfg, latest=latest)
+    print(f"追踪入库: pipeline={tracking.get('pipeline_count', 0)} records={tracking.get('records_built', 0)} new={tracking.get('new_records', 0)}")
+
+    _banner("收益回填")
+    outcomes = update_outcomes(
+        cfg,
+        max_days=args.max_days,
+        one_day_profit_threshold=args.next_profit_threshold,
+        five_day_target=args.five_day_target,
+    )
+    summary = outcomes.get("summary", {})
+    print(f"收益: total={outcomes.get('outcome_count', 0)} tracked={summary.get('tracked_count', 0)} pending={summary.get('pending_count', 0)}")
+
+    _banner("因子宽表")
+    factors = build_candidate_factor_panel(cfg, latest=latest, selection_layer=args.selection_layer)
+    print(f"因子宽表: rows={factors.get('row_count', 0)} | {factors.get('json_path', '')}")
+
+    _banner("历史模式标签")
+    tags = build_historical_pattern_tags(cfg, latest=latest, min_samples=args.min_samples, persist=True)
+    print(f"模式标签: joined={tags.get('joined_outcome_count', 0)} groups={tags.get('group_count', 0)} candidates={len(tags.get('candidate_tags', []))}")
+
+    _banner("健康审计")
+    health = build_health_audit(cfg, official=False, persist=True)
+    print(f"健康审计: {health.get('status')} | 阻断 {health.get('blocking', 0)} | 提醒 {health.get('warnings', 0)}")
+    return 0 if health.get("blocking", 0) == 0 else 2
+
+
 def cmd_x1_preheat(args: argparse.Namespace) -> int:
     cfg = load_settings()
     ensure_output_dirs(cfg)
-    from src.x1_preheat import run_preheat
 
     print("开始 X1Beam 预热...")
     x1_cfg = (cfg.get("strategies") or {}).get("x1beam", {})
     preheat_cfg = x1_cfg.get("preheat") or {}
-    manifest = run_preheat(
+    manifest = run_x1_preheat(
         cfg,
         snapshot=Path(args.snapshot) if args.snapshot else None,
         workers=args.workers or int(preheat_cfg.get("workers", x1_cfg.get("workers", 1))),
@@ -613,6 +710,22 @@ def main() -> int:
     snapshot.add_argument("--stats", action="store_true")
     snapshot.set_defaults(func=cmd_snapshot)
 
+    snapshot_prepare = sub.add_parser("snapshot-prepare", help="把只读上游多源快照导入为 V2.0 正式运行快照")
+    snapshot_prepare.add_argument("--source", help="指定上游快照目录；默认按配置候选自动选择")
+    snapshot_prepare.add_argument("--force", action="store_true", help="导入后质检不通过时仍保留，仅用于排查")
+    snapshot_prepare.set_defaults(func=cmd_snapshot_prepare)
+
+    pre_tail = sub.add_parser("pre-tail-prep", help="尾盘前准备：V2快照 + 正式质检 + X1Beam预热 + 健康审计")
+    pre_tail.add_argument("--source", help="指定上游快照目录；默认按配置候选自动选择")
+    pre_tail.add_argument("--allow-stale", action="store_true", help="排查/非交易日使用：不要求快照日期等于今天")
+    pre_tail.add_argument("--force", action="store_true", help="质量闸门不通过仍继续，仅用于排查")
+    pre_tail.add_argument("--skip-x1", action="store_true", help="只准备快照和健康审计，不跑 X1Beam 预热")
+    pre_tail.add_argument("--allow-x1-fail", action="store_true", help="X1 预热失败时不让命令失败")
+    pre_tail.add_argument("--workers", type=int, default=0)
+    pre_tail.add_argument("--timeout", type=int, default=0)
+    pre_tail.add_argument("--time-budget", type=float, default=0)
+    pre_tail.set_defaults(func=cmd_pre_tail_prep)
+
     x1_preheat = sub.add_parser("x1-preheat", help="非尾盘生成 X1Beam 完整预热缓存")
     x1_preheat.add_argument("--snapshot")
     x1_preheat.add_argument("--workers", type=int, default=0, help="0 表示使用配置 strategies.x1beam.preheat.workers")
@@ -665,6 +778,15 @@ def main() -> int:
     outcome_rep = sub.add_parser("outcome-report", help="汇总当前收益追踪结果")
     outcome_rep.add_argument("--detail", action="store_true")
     outcome_rep.set_defaults(func=cmd_outcome_report)
+
+    post_market = sub.add_parser("post-market-refresh", help="盘后刷新：追踪入库、收益回填、因子宽表、历史模式标签")
+    post_market.add_argument("--all", action="store_true", help="回放全部 pipeline；默认只处理最新")
+    post_market.add_argument("--max-days", type=int, default=5)
+    post_market.add_argument("--next-profit-threshold", type=float, default=0.0)
+    post_market.add_argument("--five-day-target", type=float, default=0.05)
+    post_market.add_argument("--selection-layer", choices=["all", "strategy_top", "overlap"], default="all")
+    post_market.add_argument("--min-samples", type=int, default=3)
+    post_market.set_defaults(func=cmd_post_market_refresh)
 
     health = sub.add_parser("health", help="端到端健康审计：数据、策略、XGB、X1Beam、追踪")
     health.add_argument("--official", action="store_true", help="按正式尾盘口径检查交易日")

@@ -123,6 +123,14 @@ def latest_status(cfg: Dict[str, Any], snapshot_dir: Optional[Path] = None) -> D
         summary_quality = X1BeamAdapter(x1_dir)._summary_quality(x1_dir / "cache" / "_summary")
     except Exception:
         summary_quality = {}
+    reason = str(manifest.get("error") or "")
+    if not reason:
+        if not completed:
+            reason = "尚未完成 X1Beam 预热"
+        elif not cache_exists:
+            reason = "X1Beam 预热缓存文件不存在"
+        elif current_sig and not matches_current:
+            reason = "X1Beam 预热缓存与当前活动快照不匹配"
 
     return {
         "exists": bool(manifest.get("exists")),
@@ -130,6 +138,7 @@ def latest_status(cfg: Dict[str, Any], snapshot_dir: Optional[Path] = None) -> D
         "completed": completed,
         "cache_exists": cache_exists,
         "matches_current_snapshot": matches_current,
+        "snapshot_match": matches_current,
         "manifest_path": manifest.get("path", str(manifest_path(cfg))),
         "cache_path": str(cache_path) if cache_path else "",
         "snapshot_dir": (manifest.get("snapshot_signature") or {}).get("snapshot_dir", ""),
@@ -141,7 +150,8 @@ def latest_status(cfg: Dict[str, Any], snapshot_dir: Optional[Path] = None) -> D
         "generated_at": generated_at,
         "age_minutes": age_minutes,
         "mode": manifest.get("mode", ""),
-        "error": manifest.get("error", ""),
+        "error": str(manifest.get("error") or ""),
+        "reason": reason,
         "summary_quality": summary_quality,
         "source_signature": manifest.get("source_signature") or {},
         "current_snapshot_signature": current_sig,
@@ -155,23 +165,23 @@ def select_tail_snapshot(cfg: Dict[str, Any], default_snapshot: Path) -> Tuple[P
 
     status = latest_status(cfg)
     if not status.get("usable"):
-        return default_snapshot, "active_snapshot_no_x1_preheat", latest_status(cfg, default_snapshot)
+        return default_snapshot, "active_snapshot", latest_status(cfg, default_snapshot)
 
     current_sig = snapshot_signature(default_snapshot)
     source_sig = status.get("source_signature") or {}
     if source_sig and not signatures_match(source_sig, current_sig):
-        return default_snapshot, "active_snapshot_x1_preheat_source_mismatch", latest_status(cfg, default_snapshot)
+        return default_snapshot, "active_snapshot", latest_status(cfg, default_snapshot)
     if not source_sig and status.get("trade_date") and status.get("trade_date") != current_sig.get("trade_date"):
-        return default_snapshot, "active_snapshot_x1_preheat_trade_date_mismatch", latest_status(cfg, default_snapshot)
+        return default_snapshot, "active_snapshot", latest_status(cfg, default_snapshot)
 
     frozen_dir = Path(str(status.get("snapshot_dir") or ""))
     if not frozen_dir.exists():
-        return default_snapshot, "active_snapshot_missing_frozen", latest_status(cfg, default_snapshot)
+        return default_snapshot, "active_snapshot", latest_status(cfg, default_snapshot)
 
     max_age = float(preheat_cfg.get("max_age_minutes", 60))
     age = status.get("age_minutes")
     if age is not None and age > max_age:
-        return default_snapshot, "active_snapshot_x1_preheat_stale", latest_status(cfg, default_snapshot)
+        return default_snapshot, "active_snapshot", latest_status(cfg, default_snapshot)
 
     return frozen_dir, "x1_preheated_frozen_snapshot", latest_status(cfg, frozen_dir)
 
