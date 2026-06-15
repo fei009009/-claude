@@ -271,8 +271,16 @@ async function tailReady(){
   html+=`<div>状态：${status}，阻断 ${d.blocking||0}，提醒 ${d.warnings||0}${firstBlock?'；首个阻断：'+esc(firstBlock.detail||firstBlock.name):''}</div>`;
   const wt=d.windows_tasks||{};const tasks=wt.tasks||[];
   if(tasks.length){
-    html+=`<div>自动任务：${wt.ok?'<span class="ok">已注册</span>':'<span class="bad">需修复</span>'}，${wt.count||0}/${wt.total||tasks.length}</div>`;
-    tasks.forEach(t=>{html+=`<div>${t.exists?tag(true):tag(false)} ${esc(t.name||'')}：${esc(t.next_run_time||'-')}；${esc(t.task_to_run||t.expected_script||'')}</div>`})
+    const readyCount=wt.ready_count??wt.count??0,total=wt.total||tasks.length;
+    html+=`<div>自动任务：${wt.ok?'<span class="ok">已就绪</span>':'<span class="bad">需修复</span>'}，${readyCount}/${total}</div>`;
+    tasks.forEach(t=>{
+      const readiness=t.ready?tag(true):(t.exists?tag(false,true):tag(false));
+      const target=t.target_matches?'指向匹配':'指向异常';
+      const script=t.script_exists?'脚本存在':'脚本缺失';
+      const last=`上次 ${t.last_run_time||'-'} / ${t.last_result||'-'}`;
+      const log=t.log_exists?`日志 ${t.log_mtime||'-'}`:'暂无日志';
+      html+=`<div>${readiness} ${esc(t.description||t.name||'')}：下次 ${esc(t.next_run_time||t.expected_time||'-')}；${esc(target)}；${esc(script)}；${esc(last)}；${esc(log)}</div>`;
+    })
   }
   (d.checks||[]).forEach(c=>{html+=`<div>${tag(c.ok,c.warning)} ${esc(c.name)}：${esc(c.detail)}</div>`});
   $('tailBox').innerHTML=html

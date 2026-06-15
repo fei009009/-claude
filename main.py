@@ -740,7 +740,7 @@ def cmd_windows_tasks(args: argparse.Namespace) -> int:
     for row in report.get("tasks") or report.get("results") or []:
         print(
             f"  {row.get('name')} | "
-            f"{'存在' if row.get('exists', row.get('ok')) else '缺失/失败'} | "
+            f"{'就绪' if row.get('ready') else ('存在' if row.get('exists', row.get('ok')) else '缺失/失败')} | "
             f"next={row.get('next_run_time', '-')} | "
             f"last={row.get('last_run_time', '-')} | "
             f"result={row.get('last_result', row.get('returncode', '-'))}"
@@ -749,6 +749,10 @@ def cmd_windows_tasks(args: argparse.Namespace) -> int:
             print(f"    run: {row.get('task_to_run')}")
         if row.get("script"):
             print(f"    script: {row.get('script')}")
+        if "script_exists" in row or "target_matches" in row:
+            print(f"    ready: script_exists={row.get('script_exists')} target_matches={row.get('target_matches')}")
+        if row.get("log_path"):
+            print(f"    log: {row.get('log_path')} | mtime={row.get('log_mtime', '-')}")
         if row.get("stderr"):
             print(f"    err: {row.get('stderr')}")
     return 0 if report.get("ok") else 2
