@@ -299,6 +299,86 @@ def _latest_factor_eval() -> Dict[str, Any]:
     }
 
 
+def _latest_tradeability() -> Dict[str, Any]:
+    from src.common import repair_mojibake
+
+    report_dir = ROOT / "outputs" / "reports"
+    current = report_dir / "tradeability_current.json"
+    files = [current] if current.exists() else []
+    if not files and report_dir.exists():
+        files = sorted(report_dir.glob("tradeability_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not files:
+        return {"exists": False, "file": "", "summary": {}, "top": []}
+    path = files[0]
+    data = _load_json(path) or {}
+    top = []
+    for row in (data.get("top") or [])[:12]:
+        clean = dict(row)
+        clean["name"] = repair_mojibake(clean.get("name", ""))
+        top.append(clean)
+    return {
+        "exists": True,
+        "file": path.name,
+        "path": str(path),
+        "mtime": datetime.fromtimestamp(path.stat().st_mtime).isoformat(timespec="seconds"),
+        "summary": data.get("summary", {}),
+        "message": data.get("message", ""),
+        "top": top,
+    }
+
+
+def _tradeability_maps() -> tuple[Dict[str, Dict[str, Any]], Dict[tuple[str, str], Dict[str, Any]]]:
+    from src.common import norm_code, repair_mojibake, safe_float
+
+    current = ROOT / "outputs" / "reports" / "tradeability_current.json"
+    data = _load_json(current) if current.exists() else None
+    if not data:
+        return {}, {}
+
+    by_code: Dict[str, Dict[str, Any]] = {}
+    by_layer: Dict[tuple[str, str], Dict[str, Any]] = {}
+    severity = {"avoid": 3, "caution": 2, "ok": 1}
+
+    def clean(row: Dict[str, Any]) -> Dict[str, Any]:
+        item = dict(row)
+        item["code"] = norm_code(item.get("code", ""))
+        item["name"] = repair_mojibake(item.get("name", ""))
+        return item
+
+    def worse(left: Dict[str, Any], right: Dict[str, Any]) -> Dict[str, Any]:
+        left_level = severity.get(str(left.get("tradeability_level")), 0)
+        right_level = severity.get(str(right.get("tradeability_level")), 0)
+        if right_level != left_level:
+            return right if right_level > left_level else left
+        return right if safe_float(right.get("tradeability_score"), 1.0) < safe_float(left.get("tradeability_score"), 1.0) else left
+
+    for raw in data.get("items") or data.get("top") or []:
+        if not isinstance(raw, dict):
+            continue
+        item = clean(raw)
+        code = item.get("code", "")
+        if not code:
+            continue
+        layer = str(item.get("selection_layer") or "")
+        if layer:
+            key = (code, layer)
+            by_layer[key] = worse(by_layer[key], item) if key in by_layer else item
+        by_code[code] = worse(by_code[code], item) if code in by_code else item
+    return by_code, by_layer
+
+
+def _tradeability_for(
+    code: Any,
+    layer: str,
+    by_code: Dict[str, Dict[str, Any]],
+    by_layer: Dict[tuple[str, str], Dict[str, Any]],
+) -> Dict[str, Any]:
+    from src.common import norm_code
+
+    normalized = norm_code(code)
+    return by_layer.get((normalized, layer)) or by_code.get(normalized) or {}
+
+
 def _latest_pattern_tags() -> Dict[str, Any]:
     from src.common import repair_mojibake
 
@@ -368,6 +448,7 @@ def _tracking_status(cfg: Dict[str, Any]) -> Dict[str, Any]:
             "strategy_source_counts": report.get("strategy_source_counts", {}),
             "latest_factor_panel": _latest_factor_panel(),
             "latest_factor_eval": _latest_factor_eval(),
+            "latest_tradeability": _latest_tradeability(),
             "latest_pattern_tags": _latest_pattern_tags(),
             "outcomes": {
                 "generated_at": outcomes.get("generated_at", ""),
@@ -379,6 +460,7 @@ def _tracking_status(cfg: Dict[str, Any]) -> Dict[str, Any]:
             "error": str(exc),
             "latest_factor_panel": _latest_factor_panel(),
             "latest_factor_eval": _latest_factor_eval(),
+            "latest_tradeability": _latest_tradeability(),
             "latest_pattern_tags": _latest_pattern_tags(),
         }
 
@@ -650,6 +732,7 @@ def _v2_status() -> Dict[str, Any]:
 
     name_snapshot_dir = pipeline_snapshot if pipeline_snapshot.exists() else snapshot_dir
     name_map = _build_name_map(name_snapshot_dir, pipeline)
+    trade_by_code, trade_by_layer = _tradeability_maps()
     summary = pipeline.get("summary", {})
     strategies = []
     for result in pipeline.get("strategies", []):
@@ -681,6 +764,7 @@ def _v2_status() -> Dict[str, Any]:
                     "sentiment_action": row.get("sentiment_action", ""),
                     "sentiment_context": row.get("sentiment_context"),
                     "sentiment_tradeability_score": row.get("sentiment_tradeability_score"),
+                    "tradeability": _tradeability_for(row.get("code", ""), "strategy_top", trade_by_code, trade_by_layer),
                 }
                 for idx, row in enumerate(top[:10])
             ],
@@ -704,6 +788,7 @@ def _v2_status() -> Dict[str, Any]:
             "sentiment_action": item.get("sentiment_action", ""),
             "sentiment_context": item.get("sentiment_context"),
             "sentiment_tradeability_score": item.get("sentiment_tradeability_score"),
+            "tradeability": _tradeability_for(item.get("code", ""), "overlap", trade_by_code, trade_by_layer),
         })
 
     boundary = pipeline.get("boundary")
@@ -948,6 +1033,7 @@ class Handler(BaseHTTPRequestHandler):
             "tracking-ingest",
             "factor-panel",
             "factor-eval",
+            "tradeability",
             "pattern-tags",
             "outcome-update",
             "post-market-refresh",

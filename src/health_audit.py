@@ -571,6 +571,28 @@ def _audit_tracking(cfg: Dict[str, Any], pipeline: Dict[str, Any], pipeline_path
         warning=not factor_eval_ok,
         data=factor_eval,
     )
+    tradeability_path = report_dir / "tradeability_current.json"
+    tradeability: Dict[str, Any] = {}
+    if tradeability_path.exists():
+        try:
+            tradeability = json.loads(tradeability_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            tradeability = {"error": str(exc)}
+    tradeability_summary = tradeability.get("summary") or {}
+    tradeability_ok = bool(tradeability_path.exists()) and not tradeability.get("error")
+    add(
+        "tracking",
+        "可交易性软过滤",
+        tradeability_ok,
+        (
+            f"{tradeability_path.name if tradeability_path.exists() else '尚未生成 tradeability'} | "
+            f"ok={tradeability_summary.get('ok_count', 0)} "
+            f"caution={tradeability_summary.get('caution_count', 0)} "
+            f"avoid={tradeability_summary.get('avoid_count', 0)}"
+        ),
+        warning=not tradeability_ok,
+        data=tradeability_summary,
+    )
     pattern_dir = output_root(cfg) / "patterns"
     pattern_files = sorted(pattern_dir.glob("historical_pattern_tags*.json"), key=lambda p: p.stat().st_mtime) if pattern_dir.exists() else []
     add(
@@ -587,6 +609,7 @@ def _audit_tracking(cfg: Dict[str, Any], pipeline: Dict[str, Any], pipeline_path
         "outcome_summary": outcome_summary,
         "latest_factor_panel": factor_files[-1].name if factor_files else "",
         "latest_factor_eval": factor_eval_path.name if factor_eval_path.exists() else "",
+        "latest_tradeability": tradeability_path.name if tradeability_path.exists() else "",
         "latest_pattern_tags": pattern_files[-1].name if pattern_files else "",
     }
 

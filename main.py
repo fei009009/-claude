@@ -30,6 +30,7 @@ from src.snapshot_manager import live_current_dir, prepare_live_snapshot
 from src.tail_automation import run_tail_once, run_tail_watch
 from src.tail_readiness import audit as tail_readiness_audit
 from src.tail_readiness import build_push_markdown as build_readiness_md
+from src.tradeability_filter import build_tradeability_report
 from src.tracking_outcomes import outcome_report, update_outcomes
 from src.tracking_store import ingest_pipeline_file, ingest_pipelines, summarize_tracking
 from src.wecom_push import build_run_markdown, push_test_markdown, push_wecom
@@ -567,6 +568,15 @@ def cmd_post_market_refresh(args: argparse.Namespace) -> int:
         f"{factor_eval.get('message', '')}"
     )
 
+    _banner("可交易性软过滤")
+    tradeability = build_tradeability_report(cfg, latest=latest, selection_layer=args.selection_layer, persist=True)
+    ts = tradeability.get("summary", {})
+    print(
+        f"可交易性: 可买 {ts.get('ok_count', 0)} | "
+        f"谨慎 {ts.get('caution_count', 0)} | 不宜买 {ts.get('avoid_count', 0)} | "
+        f"{tradeability.get('current_path', '')}"
+    )
+
     _banner("历史模式标签")
     tags = build_historical_pattern_tags(cfg, latest=latest, min_samples=args.min_samples, persist=True)
     print(f"模式标签: joined={tags.get('joined_outcome_count', 0)} groups={tags.get('group_count', 0)} candidates={len(tags.get('candidate_tags', []))}")
@@ -684,6 +694,33 @@ def cmd_factor_eval(args: argparse.Namespace) -> int:
             f"avgIC={safe_float(row.get('avg_aligned_ic'), 0):.4f} | "
             f"样本>={row.get('min_sample_count', 0)} | "
             f"最佳目标={row.get('best_target', '-')}"
+        )
+    print(f"报告: {report.get('report_path', '')}")
+    return 0
+
+
+def cmd_tradeability(args: argparse.Namespace) -> int:
+    cfg = load_settings()
+    ensure_output_dirs(cfg)
+    report = build_tradeability_report(
+        cfg,
+        latest=not args.all,
+        selection_layer=args.selection_layer,
+        persist=True,
+    )
+    summary = report.get("summary", {})
+    print(
+        f"可交易性软过滤: 总 {summary.get('count', 0)} | "
+        f"可买 {summary.get('ok_count', 0)} | "
+        f"谨慎 {summary.get('caution_count', 0)} | "
+        f"不宜买 {summary.get('avoid_count', 0)}"
+    )
+    for row in (report.get("top") or [])[:12]:
+        reasons = row.get("blockers") or row.get("warnings") or []
+        print(
+            f"  {row.get('tradeability_label')} {row.get('code')} {row.get('name')} "
+            f"score={safe_float(row.get('tradeability_score'), 0):.3f} | "
+            f"{'；'.join(str(item) for item in reasons[:3])}"
         )
     print(f"报告: {report.get('report_path', '')}")
     return 0
@@ -947,6 +984,11 @@ def main() -> int:
     factor_eval = sub.add_parser("factor-eval", help="评估因子 IC/RankIC、TopK 与分组收益")
     factor_eval.add_argument("--min-samples", type=int, default=20, help="最小真实收益样本数")
     factor_eval.set_defaults(func=cmd_factor_eval)
+
+    tradeability = sub.add_parser("tradeability", help="生成候选可交易性软过滤报告")
+    tradeability.add_argument("--all", action="store_true", help="回放全部 pipeline；默认只处理最新")
+    tradeability.add_argument("--selection-layer", choices=["all", "strategy_top", "overlap"], default="all")
+    tradeability.set_defaults(func=cmd_tradeability)
 
     outcome_update = sub.add_parser("outcome-update", help="按快照 TXT 回填次日/5日收益追踪")
     outcome_update.add_argument("--max-days", type=int, default=5)
