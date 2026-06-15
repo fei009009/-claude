@@ -333,6 +333,7 @@ def _strategy_diagnostics(pipeline: Dict[str, Any], name_map: Dict[str, str], di
                     strategy_count=1,
                 )
             )
+            top[-1]["strategy_metrics"] = _strategy_metrics(key, row)
         groups.append(
             {
                 "key": key,
@@ -346,6 +347,93 @@ def _strategy_diagnostics(pipeline: Dict[str, Any], name_map: Dict[str, str], di
         )
     groups.sort(key=lambda row: (preferred_order.get(str(row.get("key")), 99), str(row.get("name") or "")))
     return groups
+
+
+def _fmt_num(value: Any, digits: int = 2, default: str = "-") -> str:
+    from src.common import safe_float
+
+    if value in (None, ""):
+        return default
+    number = safe_float(value, None)  # type: ignore[arg-type]
+    if number is None:
+        return str(value)
+    text = f"{number:.{digits}f}"
+    return text.rstrip("0").rstrip(".")
+
+
+def _fmt_pct_value(value: Any, digits: int = 1, default: str = "-") -> str:
+    if value in (None, ""):
+        return default
+    return f"{_fmt_num(value, digits, default)}%"
+
+
+def _fmt_ratio_pct(value: Any, digits: int = 1, default: str = "-") -> str:
+    from src.common import safe_float
+
+    if value in (None, ""):
+        return default
+    number = safe_float(value, None)  # type: ignore[arg-type]
+    if number is None:
+        return str(value)
+    return f"{number * 100:.{digits}f}%"
+
+
+def _short_text(value: Any, limit: int = 46) -> str:
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 1)] + "…"
+
+
+def _strategy_metrics(strategy_key: str, row: Dict[str, Any]) -> Dict[str, Any]:
+    key = str(strategy_key or "").lower()
+    if key == "v10":
+        compact = (
+            f"P80 {row.get('p80_count', '-')} | "
+            f"Lift {_fmt_num(row.get('lift_score'), 2)} | "
+            f"WR28 {_fmt_pct_value(row.get('wr28'), 1)} | "
+            f"+{row.get('positive_count', 0)}/-{row.get('negative_count', 0)}"
+        )
+        detail = (
+            f"{compact} | LU1 {_fmt_pct_value(row.get('top_lu1_rate'), 1)} | "
+            f"规则 {_short_text(row.get('top_rule'), 120)}"
+        )
+        return {"template": "V10", "compact": compact, "detail": detail}
+    if key == "v1":
+        compact = (
+            f"+{row.get('positive_count', 0)}/-{row.get('negative_count', 0)} | "
+            f"LU1 {_fmt_pct_value(row.get('top_lu1_rate'), 1)} | "
+            f"负LU1 {_fmt_pct_value(row.get('top_negative_lu1_rate'), 1)}"
+        )
+        detail = (
+            f"{compact} | LU5 {_fmt_pct_value(row.get('top_lu5_rate'), 1)} | "
+            f"规则 {_short_text(row.get('top_rule'), 120)}"
+        )
+        return {"template": "V1", "compact": compact, "detail": detail}
+    if key == "v4":
+        compact = (
+            f"命中 {row.get('match_count', '-')} | "
+            f"LU1 {_fmt_pct_value(row.get('top_lu1_rate'), 1)} | "
+            f"LU5 {_fmt_pct_value(row.get('top_lu5_rate'), 1)}"
+        )
+        detail = (
+            f"{compact} | MaxH {_fmt_pct_value(row.get('top_maxh_win'), 1)} | "
+            f"Cls {_fmt_pct_value(row.get('top_cls_win'), 1)} | "
+            f"规则 {_short_text(row.get('top_rule'), 120)}"
+        )
+        return {"template": "V4", "compact": compact, "detail": detail}
+    if key == "x1beam":
+        compact = (
+            f"WR {_fmt_ratio_pct(row.get('wr'), 1)} | "
+            f"Lift {_fmt_num(row.get('lift'), 2)} | "
+            f"组合 {row.get('matched_combos', '-')}"
+        )
+        detail = (
+            f"{compact} | AvgWR {_fmt_ratio_pct(row.get('avg_wr'), 1)} | "
+            f"层级 {row.get('tier', '-')} | 路径 {_short_text(row.get('top_path'), 140)}"
+        )
+        return {"template": "X1Beam", "compact": compact, "detail": detail}
+    return {"template": strategy_key, "compact": "", "detail": ""}
 
 
 def _clean_boundary(boundary: Dict[str, Any], name_map: Dict[str, str]) -> Dict[str, Any]:
@@ -920,10 +1008,13 @@ def _v2_status() -> Dict[str, Any]:
                     "sentiment_context": row.get("sentiment_context"),
                     "sentiment_tradeability_score": row.get("sentiment_tradeability_score"),
                     "tradeability": _tradeability_for(row.get("code", ""), "strategy_top", trade_by_code, trade_by_layer),
+                    "strategy_metrics": _strategy_metrics(str(result.get("strategy_name", "")), row),
                 }
                 for idx, row in enumerate(top[:10])
             ],
         })
+    preferred_strategy_order = {"v10": 0, "v1": 1, "v4": 2, "x1beam": 3}
+    strategies.sort(key=lambda row: (preferred_strategy_order.get(str(row.get("key", "")).lower(), 99), str(row.get("name", ""))))
 
     overlap = pipeline.get("overlap", {})
     overlaps = []
