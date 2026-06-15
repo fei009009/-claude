@@ -561,13 +561,24 @@ def _load_latest_tails(n: int = 10) -> list[Dict[str, Any]]:
     return rows
 
 
-def _latest_tail_summary() -> Dict[str, Any]:
+def _tail_record_mode(row: Dict[str, Any], cfg: Dict[str, Any]) -> str:
+    tail = (cfg.get("automation") or {}).get("tail") or {}
+    start = str(tail.get("start_time", "14:50:00"))
+    end = str(tail.get("end_time", "14:57:00"))
+    started = str(row.get("started_at") or row.get("_mtime") or "")
+    clock = started[11:19] if "T" in started and len(started) >= 19 else ""
+    return "formal" if clock and start <= clock <= end else "test"
+
+
+def _latest_tail_summary(cfg: Dict[str, Any]) -> Dict[str, Any]:
     rows = _load_latest_tails(1)
     if not rows:
         return {"exists": False}
     row = dict(rows[0])
+    mode = _tail_record_mode(row, cfg)
     return {
         "exists": True,
+        "mode": mode,
         "file": row.get("_file", ""),
         "mtime": row.get("_mtime", ""),
         "label": row.get("label", row.get("tail_label", "")),
@@ -743,7 +754,7 @@ def _v2_status() -> Dict[str, Any]:
         "evolution": build_evolution_status(cfg),
         "sentiment": build_sentiment_regime(cfg),
         "health": _health_status(cfg),
-        "latest_tail": _latest_tail_summary(),
+        "latest_tail": _latest_tail_summary(cfg),
         "latest_run": None,
         "boundary": None,
     }
