@@ -11,11 +11,13 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 from src.boundary_audit import scan_boundary_candidates
+from src.common import safe_float
 from src.dashboard import run as run_dashboard
 from src.diagnosis.annotate import annotate_all
 from src.diagnosis.service import run_xgb_validation_layer
 from src.diagnosis.xgb_calibration import build_xgb_calibration_status
 from src.candidate_factor_panel import build_candidate_factor_panel
+from src.factor_eval import build_factor_eval
 from src.health_audit import build_health_audit
 from src.historical_pattern_tags import build_historical_pattern_tags
 from src.native_snapshot import build_native_snapshot, promote_latest_native_snapshot
@@ -557,6 +559,14 @@ def cmd_post_market_refresh(args: argparse.Namespace) -> int:
     factors = build_candidate_factor_panel(cfg, latest=latest, selection_layer=args.selection_layer)
     print(f"因子宽表: rows={factors.get('row_count', 0)} | {factors.get('json_path', '')}")
 
+    _banner("因子有效性验证")
+    factor_eval = build_factor_eval(cfg, min_samples=args.eval_min_samples, persist=True)
+    print(
+        f"因子验证: {factor_eval.get('status')} | "
+        f"样本 {factor_eval.get('joined_sample_count', 0)}/{factor_eval.get('min_samples', 0)} | "
+        f"{factor_eval.get('message', '')}"
+    )
+
     _banner("历史模式标签")
     tags = build_historical_pattern_tags(cfg, latest=latest, min_samples=args.min_samples, persist=True)
     print(f"模式标签: joined={tags.get('joined_outcome_count', 0)} groups={tags.get('group_count', 0)} candidates={len(tags.get('candidate_tags', []))}")
@@ -655,6 +665,27 @@ def cmd_factor_panel(args: argparse.Namespace) -> int:
     print(f"候选因子宽表: {report.get('row_count', 0)} 行")
     print(f"JSON: {report.get('json_path', '')}")
     print(f"CSV: {report.get('csv_path', '')}")
+    return 0
+
+
+def cmd_factor_eval(args: argparse.Namespace) -> int:
+    cfg = load_settings()
+    ensure_output_dirs(cfg)
+    report = build_factor_eval(cfg, min_samples=args.min_samples, persist=True)
+    print(
+        f"因子有效性: {report.get('status')} | "
+        f"已连接收益样本 {report.get('joined_sample_count', 0)}/{report.get('min_samples', 0)}"
+    )
+    print(report.get("message", ""))
+    for row in (report.get("factor_summary") or [])[:10]:
+        print(
+            f"  {row.get('factor_label')} | "
+            f"avg_rankIC={safe_float(row.get('avg_aligned_rank_ic'), 0):.4f} | "
+            f"avgIC={safe_float(row.get('avg_aligned_ic'), 0):.4f} | "
+            f"样本>={row.get('min_sample_count', 0)} | "
+            f"最佳目标={row.get('best_target', '-')}"
+        )
+    print(f"报告: {report.get('report_path', '')}")
     return 0
 
 
@@ -913,6 +944,10 @@ def main() -> int:
     )
     factor_panel.set_defaults(func=cmd_factor_panel)
 
+    factor_eval = sub.add_parser("factor-eval", help="评估因子 IC/RankIC、TopK 与分组收益")
+    factor_eval.add_argument("--min-samples", type=int, default=20, help="最小真实收益样本数")
+    factor_eval.set_defaults(func=cmd_factor_eval)
+
     outcome_update = sub.add_parser("outcome-update", help="按快照 TXT 回填次日/5日收益追踪")
     outcome_update.add_argument("--max-days", type=int, default=5)
     outcome_update.add_argument("--next-profit-threshold", type=float, default=0.0, help="次日冲高盈利阈值，0 表示高于出票价")
@@ -935,6 +970,7 @@ def main() -> int:
     post_market.add_argument("--five-day-target", type=float, default=0.05)
     post_market.add_argument("--selection-layer", choices=["all", "strategy_top", "overlap"], default="all")
     post_market.add_argument("--min-samples", type=int, default=3)
+    post_market.add_argument("--eval-min-samples", type=int, default=20)
     post_market.set_defaults(func=cmd_post_market_refresh)
 
     health = sub.add_parser("health", help="端到端健康审计：数据、策略、XGB、X1Beam、追踪")

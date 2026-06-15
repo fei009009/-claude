@@ -549,6 +549,28 @@ def _audit_tracking(cfg: Dict[str, Any], pipeline: Dict[str, Any], pipeline_path
         factor_files[-1].name if factor_files else "尚未生成 candidate_factor_panel",
         warning=not bool(factor_files),
     )
+    report_dir = output_root(cfg) / "reports"
+    factor_eval_path = report_dir / "factor_eval_current.json"
+    factor_eval: Dict[str, Any] = {}
+    if factor_eval_path.exists():
+        try:
+            factor_eval = json.loads(factor_eval_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            factor_eval = {"status": "error", "error": str(exc)}
+    factor_eval_status = str(factor_eval.get("status") or "missing")
+    factor_eval_ok = factor_eval_status in {"ready", "waiting_outcomes"}
+    add(
+        "tracking",
+        "因子有效性验证",
+        factor_eval_ok,
+        (
+            f"{factor_eval_path.name if factor_eval_path.exists() else '尚未生成 factor_eval'} | "
+            f"status={factor_eval_status} samples={factor_eval.get('joined_sample_count', 0)}/"
+            f"{factor_eval.get('min_samples', 0)}"
+        ),
+        warning=not factor_eval_ok,
+        data=factor_eval,
+    )
     pattern_dir = output_root(cfg) / "patterns"
     pattern_files = sorted(pattern_dir.glob("historical_pattern_tags*.json"), key=lambda p: p.stat().st_mtime) if pattern_dir.exists() else []
     add(
@@ -564,6 +586,7 @@ def _audit_tracking(cfg: Dict[str, Any], pipeline: Dict[str, Any], pipeline_path
         "missing_latest": len(missing),
         "outcome_summary": outcome_summary,
         "latest_factor_panel": factor_files[-1].name if factor_files else "",
+        "latest_factor_eval": factor_eval_path.name if factor_eval_path.exists() else "",
         "latest_pattern_tags": pattern_files[-1].name if pattern_files else "",
     }
 

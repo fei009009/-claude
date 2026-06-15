@@ -276,6 +276,29 @@ def _latest_factor_panel() -> Dict[str, Any]:
     }
 
 
+def _latest_factor_eval() -> Dict[str, Any]:
+    report_dir = ROOT / "outputs" / "reports"
+    current = report_dir / "factor_eval_current.json"
+    files = [current] if current.exists() else []
+    if not files and report_dir.exists():
+        files = sorted(report_dir.glob("factor_eval_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not files:
+        return {"exists": False, "file": "", "status": "missing", "joined_sample_count": 0, "top": []}
+    path = files[0]
+    data = _load_json(path) or {}
+    return {
+        "exists": True,
+        "file": path.name,
+        "path": str(path),
+        "mtime": datetime.fromtimestamp(path.stat().st_mtime).isoformat(timespec="seconds"),
+        "status": data.get("status", ""),
+        "message": data.get("message", ""),
+        "joined_sample_count": data.get("joined_sample_count", 0),
+        "min_samples": data.get("min_samples", 0),
+        "top": (data.get("factor_summary") or [])[:8],
+    }
+
+
 def _latest_pattern_tags() -> Dict[str, Any]:
     from src.common import repair_mojibake
 
@@ -344,6 +367,7 @@ def _tracking_status(cfg: Dict[str, Any]) -> Dict[str, Any]:
             "by_diagnosis_signal": report.get("by_diagnosis_signal", {}),
             "strategy_source_counts": report.get("strategy_source_counts", {}),
             "latest_factor_panel": _latest_factor_panel(),
+            "latest_factor_eval": _latest_factor_eval(),
             "latest_pattern_tags": _latest_pattern_tags(),
             "outcomes": {
                 "generated_at": outcomes.get("generated_at", ""),
@@ -351,7 +375,12 @@ def _tracking_status(cfg: Dict[str, Any]) -> Dict[str, Any]:
             },
         }
     except Exception as exc:
-        return {"error": str(exc), "latest_factor_panel": _latest_factor_panel(), "latest_pattern_tags": _latest_pattern_tags()}
+        return {
+            "error": str(exc),
+            "latest_factor_panel": _latest_factor_panel(),
+            "latest_factor_eval": _latest_factor_eval(),
+            "latest_pattern_tags": _latest_pattern_tags(),
+        }
 
 
 def _snapshot_quality_fast(snapshot_dir: Path, cfg: Dict[str, Any]) -> Dict[str, Any]:
@@ -918,6 +947,7 @@ class Handler(BaseHTTPRequestHandler):
             "x1-preheat",
             "tracking-ingest",
             "factor-panel",
+            "factor-eval",
             "pattern-tags",
             "outcome-update",
             "post-market-refresh",
