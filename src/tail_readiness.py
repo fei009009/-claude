@@ -121,7 +121,7 @@ def audit(cfg: Dict[str, Any], probe: bool = False) -> Dict[str, Any]:
     max_pushes = int(tail_cfg.get("max_pushes", 3))
     min_ok = int(tail_cfg.get("min_strategy_success", 2))
     capacity = _capacity_minutes(start, end) * 60 // max(interval, 1)
-    add("尾盘窗口容量", capacity >= 2, f"{start}-{end}, 间隔 {interval}s, 理论 {capacity} 轮, 目标推送 {max_pushes} 轮")
+    add("尾盘窗口容量", capacity >= 2, f"{start}-{end}, 目标启动间隔 {interval}s, 理论 {capacity} 轮, 目标推送 {max_pushes} 轮")
     add("策略成功门槛", min_ok <= 2, f"成功策略 >= {min_ok} 才推送", warning=min_ok > 2)
 
     if probe:

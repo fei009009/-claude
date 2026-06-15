@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import time
 import traceback
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -331,6 +331,7 @@ def run_tail_watch(
     accepted = 0
     pushes = 0
     best_cycle: Optional[Dict[str, Any]] = None
+    next_due = datetime.now() if no_wait else start
 
     while True:
         now = datetime.now()
@@ -343,10 +344,17 @@ def run_tail_watch(
         if pushes >= max_pushes:
             _emit(f"已达到推送上限 {max_pushes}")
             break
+        if not no_wait and now < next_due:
+            wait_seconds = max(0.0, (next_due - now).total_seconds())
+            if wait_seconds > 0:
+                _emit(f"等待下一轮目标时点 {next_due:%H:%M:%S}，约 {wait_seconds:.0f}s")
+                time.sleep(min(wait_seconds, max(1, interval)))
 
         label = f"第{cycles + 1}轮"
+        due_at = next_due
         cycle = run_tail_once(cfg, push=False, label=label)
         cycles += 1
+        cycle["target_start_at"] = due_at.isoformat(timespec="seconds")
 
         if cycle.get("ok"):
             accepted += 1
@@ -363,21 +371,35 @@ def run_tail_watch(
                     if push_wecom(markdown, cfg):
                         pushes += 1
                         cycle["pushed"] = True
+                        cycle["pushed_at"] = datetime.now().isoformat(timespec="seconds")
+                        cycle["push_count"] = pushes
                         _emit(f"{label} 推送成功 {pushes}/{max_pushes}")
                     else:
+                        cycle["pushed"] = False
+                        cycle["push_error"] = "push_wecom returned False"
                         _emit(f"{label} 推送失败")
                 except Exception as exc:
+                    cycle["pushed"] = False
+                    cycle["push_error"] = str(exc)
                     _emit(f"{label} 推送异常: {exc}")
+                try:
+                    status_path = _persist_tail_status(cfg, cycle)
+                    cycle["status_path"] = str(status_path)
+                    _emit(f"{label} 推送状态已刷新: {status_path.name}")
+                except Exception as exc:
+                    _emit(f"{label} 推送状态刷新失败: {exc}")
             if best_cycle is None or cycle.get("overlap_candidates", 0) > best_cycle.get("overlap_candidates", 0):
                 best_cycle = cycle
         else:
             _emit(f"{label} 未通过: {cycle.get('error', '')}")
 
-        if not no_wait and (end - datetime.now()).total_seconds() <= interval:
+        next_due = due_at + timedelta(seconds=max(1, interval))
+        if not no_wait and datetime.now() > end:
             break
         if max_cycles is not None and cycles >= max_cycles:
             break
-        time.sleep(interval)
+        if no_wait:
+            time.sleep(interval)
 
     if push and best_cycle and pushes == 0 and accepted > 0:
         try:
@@ -391,6 +413,11 @@ def run_tail_watch(
             )
             if push_wecom(markdown, cfg):
                 pushes += 1
+                best_cycle["pushed"] = True
+                best_cycle["pushed_at"] = datetime.now().isoformat(timespec="seconds")
+                best_cycle["push_count"] = pushes
+                status_path = _persist_tail_status(cfg, best_cycle)
+                best_cycle["status_path"] = str(status_path)
                 _emit("汇总推送成功")
         except Exception as exc:
             _emit(f"汇总推送异常: {exc}")

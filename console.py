@@ -75,10 +75,10 @@ def menu() -> None:
         elif c=="3":
             codes = input("股票代码 (如 SH600000,SZ000001): ").strip()
             if codes: run(f"diagnose --codes {codes}")
-        elif c=="4": run("tail-once --push --allow-off-window")
+        elif c=="4": run("tail-once --push")
         elif c=="5":
             m = input("测试1轮[T] / 完整[F]? ").strip().upper()
-            run("tail-watch --push --no-wait --max-cycles 1 --allow-off-window" if m=="T" else "tail-watch --push")
+            run("tail-watch --push --no-wait --max-cycles 1" if m=="T" else "tail-watch --push")
         elif c=="6": run("snapshot --stats")
         elif c=="7": run("report --type daily --days 7 --persist")
         elif c=="8": subprocess.Popen(f'"{PY}" main.py dashboard', shell=True, cwd=str(ROOT))
