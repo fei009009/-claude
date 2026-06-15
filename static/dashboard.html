@@ -262,7 +262,16 @@ function renderBoundary(b){let html='';((b.risks||[])).forEach(x=>{const rk=Obje
 function renderCards(rows){let html='';rows.forEach(s=>{html+=`<section class="panel span-3"><h2>${esc(s.name)}</h2><table><thead><tr><th>#</th><th>代码</th><th>名称</th><th>策略指标</th><th>可交易</th><th>诊断</th></tr></thead><tbody>`;(s.top||[]).slice(0,10).forEach(p=>{html+=`<tr><td>${p.rank}</td><td><b>${esc(p.code)}</b></td><td>${esc(p.name)}</td><td class="wrap" title="${esc(strategyMetricDetail(p))}">${strategyMetricText(p)?esc(strategyMetricText(p)):'-'}</td><td class="wrap">${tradeText(p)?esc(tradeText(p)):'-'}</td><td class="wrap">${diagText(p)?esc(diagText(p)):'-'}</td></tr>`});html+='</tbody></table></section>'});$('detailCards').innerHTML=html||'<div class="empty">暂无明细</div>'}
 async function selfCheck(){const d=await api('/self-check');let html=`<div class="item">硬阻断：${d.blocking||0}，提醒：${d.warnings||0}</div>`;(d.checks||[]).forEach(c=>{html+=`<div class="item">${tag(c.ok,c.warning)} <b>${esc(c.name)}</b>：${esc(c.detail)}</div>`});$('selfRows').innerHTML=html}
 async function healthCheck(){try{const d=await api('/health');renderHealth(d);notice('健康审计已刷新',true)}catch(e){notice('健康审计失败: '+e,false)}}
-async function tailReady(){const d=await api('/tail-readiness');let html=`<div>窗口：<b>${esc(d.window_state)}</b> ${esc(d.window_start)}-${esc(d.window_end)}，间隔 ${d.interval_seconds}s，最多 ${d.max_pushes} 轮</div><div>状态：${d.can_push?'<span class="ok">可推送</span>':'<span class="bad">不可推送/非窗口</span>'}，阻断 ${d.blocking||0}，提醒 ${d.warnings||0}</div>`;(d.checks||[]).forEach(c=>{html+=`<div>${tag(c.ok,c.warning)} ${esc(c.name)}：${esc(c.detail)}</div>`});$('tailBox').innerHTML=html}
+function tailWindowText(s){return s==='during'?'窗口中':(s==='before'?'窗口未到':(s==='after'?'窗口已过':s||'-'))}
+async function tailReady(){
+  const d=await api('/tail-readiness');
+  const firstBlock=(d.checks||[]).find(c=>!c.ok&&!c.warning);
+  let status=d.can_push?'<span class="ok">可推送</span>':(d.blocking?'<span class="bad">质量阻断</span>':'<span class="warnc">等待窗口</span>');
+  let html=`<div>窗口：<b>${esc(tailWindowText(d.window_state))}</b> ${esc(d.window_start)}-${esc(d.window_end)}，目标启动间隔 ${d.interval_seconds}s，最多 ${d.max_pushes} 轮</div>`;
+  html+=`<div>状态：${status}，阻断 ${d.blocking||0}，提醒 ${d.warnings||0}${firstBlock?'；首个阻断：'+esc(firstBlock.detail||firstBlock.name):''}</div>`;
+  (d.checks||[]).forEach(c=>{html+=`<div>${tag(c.ok,c.warning)} ${esc(c.name)}：${esc(c.detail)}</div>`});
+  $('tailBox').innerHTML=html
+}
 async function historyLoad(){const d=await api('/history?n=12');let html='';(d.pipelines||[]).forEach(p=>{html+=`<tr><td>${esc((p.timestamp||'').replace('T',' ').slice(0,19))}</td><td>分析</td><td>-</td><td>${esc(p.tail_label||'')}</td><td>${p.strategies_ok}/${p.strategies_run}</td><td>${p.overlap_candidates}</td><td>${tag(p.quality_ok!==false,p.quality_ok===undefined)}</td><td>${Number(p.elapsed||0).toFixed(1)}s</td></tr>`});(d.tails||[]).forEach(t=>{const mode=t.mode==='formal'?'正式':'测试';html+=`<tr><td>${esc((t.started_at||t._mtime||'').replace('T',' ').slice(0,19))}</td><td>尾盘</td><td>${esc(mode)}</td><td>${esc(t.label||'')}</td><td>${t.strategies_ok||0}</td><td>${t.overlap_candidates||0}</td><td>${tag(t.ok)}</td><td>${Number(t.elapsed_seconds||0).toFixed(1)}s</td></tr>`});$('historyRows').innerHTML=html||'<tr><td colspan="8" class="empty">暂无历史</td></tr>'}
 function setJobBusy(running){
   document.querySelectorAll('button[onclick*="startJob"],button[data-job-button]').forEach(b=>{b.disabled=running});
