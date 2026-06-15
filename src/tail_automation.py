@@ -16,7 +16,7 @@ from src.quality_gate import audit_snapshot, format_quality_summary, quality_con
 from src.sentiment_regime import build_sentiment_regime
 from src.sentiment_overlay import annotate_all_with_sentiment
 from src.tracking_store import ingest_pipeline_file
-from src.wecom_push import build_run_markdown, push_wecom
+from src.wecom_push import build_run_markdown, push_wecom_report
 from src.x1_preheat import latest_status as x1_preheat_status, run_preheat as run_x1_preheat, select_tail_snapshot
 
 SEP = "-" * 72
@@ -314,8 +314,14 @@ def run_tail_once(cfg: Dict[str, Any], push: bool = True, label: str = "once", p
                 cfg=cfg,
                 label=label,
             )
-            cycle["pushed"] = push_wecom(markdown, cfg)
-            _emit(f"推送: {'OK' if cycle['pushed'] else 'FAIL'}")
+            push_report = push_wecom_report(markdown, cfg)
+            cycle["push_report"] = push_report
+            cycle["pushed"] = bool(push_report.get("ok"))
+            _emit(
+                f"推送: {'OK' if cycle['pushed'] else 'FAIL'} | "
+                f"通道 {push_report.get('ok_count', 0)}/{push_report.get('channel_count', 0)} | "
+                f"{push_report.get('elapsed_seconds', 0)}s"
+            )
         except Exception as exc:
             cycle["pushed"] = False
             _emit(f"推送异常: {exc}")
@@ -457,20 +463,30 @@ def run_tail_watch(
                         cfg=cfg,
                         label=f"{label} {now:%H:%M:%S}",
                     )
-                    if push_wecom(markdown, cfg):
+                    push_report = push_wecom_report(markdown, cfg)
+                    cycle["push_report"] = push_report
+                    if push_report.get("ok"):
                         pushes += 1
                         cycle["pushed"] = True
                         cycle["pushed_at"] = datetime.now().isoformat(timespec="seconds")
                         cycle["push_count"] = pushes
                         cycle["stage"] = "pushed"
                         cycle["running"] = False
-                        _emit(f"{label} 推送成功 {pushes}/{max_pushes}")
+                        _emit(
+                            f"{label} 推送成功 {pushes}/{max_pushes} | "
+                            f"通道 {push_report.get('ok_count', 0)}/{push_report.get('channel_count', 0)} | "
+                            f"{push_report.get('elapsed_seconds', 0)}s"
+                        )
                     else:
                         cycle["pushed"] = False
-                        cycle["push_error"] = "push_wecom returned False"
+                        cycle["push_error"] = "push_wecom_report returned False"
                         cycle["stage"] = "push_failed"
                         cycle["running"] = False
-                        _emit(f"{label} 推送失败")
+                        _emit(
+                            f"{label} 推送失败 | "
+                            f"通道 {push_report.get('ok_count', 0)}/{push_report.get('channel_count', 0)} | "
+                            f"{push_report.get('elapsed_seconds', 0)}s"
+                        )
                 except Exception as exc:
                     cycle["pushed"] = False
                     cycle["push_error"] = str(exc)
@@ -515,7 +531,9 @@ def run_tail_watch(
                 cfg=cfg,
                 label=f"汇总 {accepted}/{cycles} 轮通过",
             )
-            if push_wecom(markdown, cfg):
+            push_report = push_wecom_report(markdown, cfg)
+            best_cycle["push_report"] = push_report
+            if push_report.get("ok"):
                 pushes += 1
                 best_cycle["pushed"] = True
                 best_cycle["pushed_at"] = datetime.now().isoformat(timespec="seconds")
@@ -524,7 +542,10 @@ def run_tail_watch(
                 best_cycle["running"] = False
                 status_path = _persist_tail_status(cfg, best_cycle)
                 best_cycle["status_path"] = str(status_path)
-                _emit("汇总推送成功")
+                _emit(
+                    f"汇总推送成功 | 通道 {push_report.get('ok_count', 0)}/"
+                    f"{push_report.get('channel_count', 0)} | {push_report.get('elapsed_seconds', 0)}s"
+                )
         except Exception as exc:
             _emit(f"汇总推送异常: {exc}")
 

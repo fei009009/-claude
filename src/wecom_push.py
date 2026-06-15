@@ -192,45 +192,134 @@ def _parse_urls(cfg: Dict[str, Any]) -> List[str]:
 
 
 def push_wecom(markdown: str, cfg: Dict[str, Any], url: Optional[str] = None, retries: Optional[int] = None) -> bool:
+    return bool(push_wecom_report(markdown, cfg, url=url, retries=retries).get("ok"))
+
+
+def push_wecom_report(markdown: str, cfg: Dict[str, Any], url: Optional[str] = None, retries: Optional[int] = None) -> Dict[str, Any]:
+    started = time.perf_counter()
     if requests is None:
         print("[wecom] requests 未安装")
-        return False
+        return {
+            "ok": False,
+            "error": "requests 未安装",
+            "channel_count": 0,
+            "ok_count": 0,
+            "failed_count": 0,
+            "skipped_count": 0,
+            "channels": [],
+            "elapsed_seconds": 0,
+        }
 
     push_cfg = cfg.get("push", {})
     urls = [url] if url else _parse_urls(cfg)
     if not urls:
         print("[wecom] 未配置 webhook")
-        return False
+        return {
+            "ok": False,
+            "error": "未配置 webhook",
+            "channel_count": 0,
+            "ok_count": 0,
+            "failed_count": 0,
+            "skipped_count": 0,
+            "channels": [],
+            "elapsed_seconds": 0,
+        }
 
     retries = int(retries if retries is not None else push_cfg.get("retry_attempts", 2))
-    timeout = int(push_cfg.get("request_timeout_seconds", 10))
+    timeout = float(push_cfg.get("request_timeout_seconds", 10))
+    max_total = float(push_cfg.get("max_total_seconds", 0) or 0)
+    deadline = started + max_total if max_total > 0 else 0.0
     payload = {"msgtype": "markdown", "markdown": {"content": markdown}}
-    ok_any = False
+    channels: List[Dict[str, Any]] = []
 
     for index, target in enumerate(urls, 1):
         label = f"ch{index}" if len(urls) > 1 else "default"
+        channel_started = time.perf_counter()
+        channel: Dict[str, Any] = {"label": label, "ok": False, "attempts": 0}
+        if deadline and time.perf_counter() >= deadline:
+            channel.update({"skipped": True, "error": "push budget exhausted before channel"})
+            channels.append(_finish_channel(channel, channel_started))
+            print(f"[wecom] {label} SKIP budget exhausted")
+            continue
         for attempt in range(retries + 1):
+            channel["attempts"] = attempt + 1
+            remaining = deadline - time.perf_counter() if deadline else timeout
+            if deadline and remaining < 1:
+                channel.update({"skipped": True, "error": "push budget exhausted"})
+                print(f"[wecom] {label} SKIP budget exhausted")
+                break
+            req_timeout = min(timeout, max(1.0, remaining)) if deadline else timeout
             try:
-                response = requests.post(target, json=payload, timeout=timeout)
-                data = response.json() if response.content else {}
+                response = requests.post(target, json=payload, timeout=req_timeout)
+                try:
+                    data = response.json() if response.content else {}
+                except Exception:
+                    data = {"raw": response.text[:200]}
+                channel.update(
+                    {
+                        "status_code": response.status_code,
+                        "errcode": data.get("errcode"),
+                        "errmsg": data.get("errmsg", ""),
+                    }
+                )
                 if response.status_code == 200 and data.get("errcode") == 0:
                     print(f"[wecom] {label} OK")
-                    ok_any = True
+                    channel["ok"] = True
                     break
                 if data.get("errcode") == 45009 and attempt < retries:
-                    time.sleep(3)
+                    _sleep_with_budget(3, deadline)
                     continue
                 print(f"[wecom] {label} FAIL {response.status_code} {data}")
+                channel["error"] = f"FAIL {response.status_code} {data}"
                 break
             except requests.exceptions.Timeout:
+                channel["timed_out"] = True
                 if attempt < retries:
-                    time.sleep(2)
+                    _sleep_with_budget(2, deadline)
                     continue
                 print(f"[wecom] {label} TIMEOUT")
+                channel["error"] = "TIMEOUT"
             except Exception as exc:
                 print(f"[wecom] {label} ERROR {exc}")
+                channel["error"] = str(exc)
                 break
-    return ok_any
+        channels.append(_finish_channel(channel, channel_started))
+
+    ok_count = sum(1 for item in channels if item.get("ok"))
+    skipped_count = sum(1 for item in channels if item.get("skipped"))
+    failed_count = len(channels) - ok_count - skipped_count
+    report = {
+        "ok": ok_count > 0,
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "channel_count": len(urls),
+        "ok_count": ok_count,
+        "failed_count": failed_count,
+        "skipped_count": skipped_count,
+        "elapsed_seconds": round(time.perf_counter() - started, 3),
+        "timeout_seconds": timeout,
+        "max_total_seconds": max_total,
+        "retries": retries,
+        "channels": channels,
+    }
+    print(
+        f"[wecom] summary ok={report['ok']} channels={ok_count}/{len(urls)} "
+        f"failed={failed_count} skipped={skipped_count} elapsed={report['elapsed_seconds']}s"
+    )
+    return report
+
+
+def _sleep_with_budget(seconds: float, deadline: float) -> None:
+    if not deadline:
+        time.sleep(seconds)
+        return
+    remaining = deadline - time.perf_counter()
+    if remaining > 0:
+        time.sleep(max(0, min(seconds, remaining)))
+
+
+def _finish_channel(channel: Dict[str, Any], started: float) -> Dict[str, Any]:
+    channel["elapsed_seconds"] = round(time.perf_counter() - started, 3)
+    return channel
 
 
 def push_test_markdown(cfg: Dict[str, Any]) -> bool:

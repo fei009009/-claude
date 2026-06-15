@@ -34,6 +34,7 @@ _quality_cache: Dict[str, Any] = {"expires": 0.0, "snapshot_dir": "", "source": 
 _name_map_cache: Dict[str, Any] = {"key": "", "expires": 0.0, "map": {}}
 _health_cache: Dict[str, Any] = {"expires": 0.0, "report": None}
 _tasks_cache: Dict[str, Any] = {"expires": 0.0, "report": None}
+_tail_ready_cache: Dict[str, Any] = {"expires": 0.0, "key": "", "report": None}
 
 
 def _json_bytes(data: Any) -> bytes:
@@ -868,6 +869,7 @@ def _latest_tail_summary(cfg: Dict[str, Any]) -> Dict[str, Any]:
         "ok": bool(row.get("ok")),
         "pushed": bool(row.get("pushed")),
         "push_count": row.get("push_count", 1 if row.get("pushed") else 0),
+        "push_report": row.get("push_report"),
         "min_pushes": row.get("min_pushes"),
         "max_pushes": row.get("max_pushes"),
         "cycle_count": row.get("cycle_count"),
@@ -1168,9 +1170,28 @@ def _tail_readiness() -> Dict[str, Any]:
     from src.settings import load_settings
     from src.tail_automation import tail_window_state
     from src.tail_readiness import audit
+    from src.quality_gate import resolve_snapshot
 
     cfg = load_settings()
-    report = audit(cfg)
+    snapshot_dir, _source = resolve_snapshot(cfg)
+    meta_path = Path(snapshot_dir) / "snapshot_meta.json"
+    try:
+        meta_mtime = meta_path.stat().st_mtime if meta_path.exists() else Path(snapshot_dir).stat().st_mtime
+    except Exception:
+        meta_mtime = 0
+    cache_key = f"{snapshot_dir}|{meta_mtime}"
+    now_ts = time.time()
+    if (
+        _tail_ready_cache.get("report") is not None
+        and _tail_ready_cache.get("key") == cache_key
+        and float(_tail_ready_cache.get("expires", 0) or 0) > now_ts
+    ):
+        report = dict(_tail_ready_cache.get("report") or {})
+        report["cache"] = "hit"
+    else:
+        report = audit(cfg)
+        report["cache"] = "refresh"
+        _tail_ready_cache.update({"expires": now_ts + 45, "key": cache_key, "report": report})
     state = tail_window_state(cfg)
     tw = report.get("tail_window", {})
     return {
@@ -1185,6 +1206,7 @@ def _tail_readiness() -> Dict[str, Any]:
         "checks": report.get("checks", []),
         "can_push": state == "during" and report.get("blocking", 0) == 0,
         "status": report.get("status", "blocked"),
+        "cache": report.get("cache", ""),
         "windows_tasks": _windows_tasks_status(),
     }
 

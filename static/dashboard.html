@@ -104,13 +104,14 @@ function strategyPickChip(p){return `<span class="chip" title="${esc(strategyMet
 function sentimentCard(s){const t=(s||{}).timing||{};const group=t.state_group||'';const cls=group==='risk_on'?'ok':(group==='risk_off'?'bad':'warnc');return (s&&s.ok)?`<span class="${cls}">${esc(t.state||'-')}</span>`:'<span class="warnc">待核</span>'}
 function tailPushCard(t){
   if(!t||!t.exists)return '<span class="warnc">暂无</span>';
+  const pr=t.push_report||{};const ch=pr.channel_count?` 通道${pr.ok_count||0}/${pr.channel_count}`:'';
   if(t.running){
     const stage=t.stage||'running';const pc=t.push_count??0,mc=t.max_pushes??3,cc=t.cycle_count??0;
-    return `<span class="warnc">运行中 ${cc}轮 ${pc}/${mc}</span>`;
+    return `<span class="warnc">运行中 ${cc}轮 ${pc}/${mc}${ch}</span>`;
   }
   if(t.stage==='completed_below_min_pushes')return `<span class="bad">不足${t.push_count||0}/${t.min_pushes||2}</span>`;
-  if(t.mode==='test')return t.pushed?`<span class="warnc">测试推${t.push_count||1}</span>`:'<span class="warnc">仅测试</span>';
-  if(t.pushed)return `<span class="ok">正式${t.push_count||1}</span>`;
+  if(t.mode==='test')return t.pushed?`<span class="warnc">测试推${t.push_count||1}${ch}</span>`:'<span class="warnc">仅测试</span>';
+  if(t.pushed)return `<span class="ok">正式${t.push_count||1}${ch}</span>`;
   if(t.ok)return '<span class="warnc">正式未推</span>';
   return '<span class="bad">正式失败</span>'
 }

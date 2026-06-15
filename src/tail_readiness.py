@@ -123,6 +123,17 @@ def audit(cfg: Dict[str, Any], probe: bool = False) -> Dict[str, Any]:
     min_ok = int(tail_cfg.get("min_strategy_success", 2))
     capacity = _capacity_minutes(start, end) * 60 // max(interval, 1)
     add("尾盘窗口容量", capacity >= max(2, min_pushes), f"{start}-{end}, 目标启动间隔 {interval}s, 理论 {capacity} 轮, 目标推送 {min_pushes}-{max_pushes} 轮")
+    push_cfg = cfg.get("push") or {}
+    push_budget = float(push_cfg.get("max_total_seconds") or 0)
+    push_timeout = float(push_cfg.get("request_timeout_seconds") or 0)
+    push_retries = int(push_cfg.get("retry_attempts") or 0)
+    budget_ok = push_budget <= 0 or push_budget <= max(5, interval * 0.5)
+    add(
+        "推送耗时预算",
+        budget_ok,
+        f"通道={channel_count}, timeout={push_timeout:g}s, retries={push_retries}, max_total={push_budget:g}s, interval={interval}s",
+        warning=not budget_ok,
+    )
     runtime = _recent_cycle_runtime(cfg)
     if runtime.get("count"):
         window_seconds = _capacity_minutes(start, end) * 60

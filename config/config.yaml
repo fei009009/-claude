@@ -116,4 +116,5 @@ push:
   enabled: true
   request_timeout_seconds: 5
   retry_attempts: 2
+  max_total_seconds: 18
   markdown_max_chars: 3500
