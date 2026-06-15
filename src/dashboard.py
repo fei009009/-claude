@@ -561,6 +561,29 @@ def _load_latest_tails(n: int = 10) -> list[Dict[str, Any]]:
     return rows
 
 
+def _latest_tail_summary() -> Dict[str, Any]:
+    rows = _load_latest_tails(1)
+    if not rows:
+        return {"exists": False}
+    row = dict(rows[0])
+    return {
+        "exists": True,
+        "file": row.get("_file", ""),
+        "mtime": row.get("_mtime", ""),
+        "label": row.get("label", row.get("tail_label", "")),
+        "ok": bool(row.get("ok")),
+        "pushed": bool(row.get("pushed")),
+        "push_count": row.get("push_count", 1 if row.get("pushed") else 0),
+        "strategies_ok": row.get("strategies_ok", 0),
+        "strategies_run": row.get("strategies_run", 0),
+        "overlap_candidates": row.get("overlap_candidates", 0),
+        "elapsed_seconds": row.get("elapsed_seconds", 0),
+        "started_at": row.get("started_at", ""),
+        "pushed_at": row.get("pushed_at", ""),
+        "error": row.get("error", row.get("push_error", "")),
+    }
+
+
 def _load_recent_pipelines(n: int = 10) -> list[Dict[str, Any]]:
     rows = []
     for path in sorted(_json_dir().glob("pipeline_v2_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:n]:
@@ -720,6 +743,7 @@ def _v2_status() -> Dict[str, Any]:
         "evolution": build_evolution_status(cfg),
         "sentiment": build_sentiment_regime(cfg),
         "health": _health_status(cfg),
+        "latest_tail": _latest_tail_summary(),
         "latest_run": None,
         "boundary": None,
     }
