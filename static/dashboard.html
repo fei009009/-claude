@@ -65,7 +65,7 @@ label{display:inline-flex;align-items:center;gap:3px;color:var(--muted)}input[ty
 <section class="panel span-12"><div class="head"><h2>边界候选与风险</h2><span class="sub">8.5%-10.5% 临界涨幅审计</span></div><div class="scroll"><table><thead><tr><th>代码</th><th>名称</th><th>涨幅</th><th>是否入选</th><th>风险原因</th><th>策略排名</th></tr></thead><tbody id="boundaryRows"></tbody></table></div></section>
 <section class="panel span-12"><div class="head"><h2>策略明细卡片</h2></div><div class="grid" id="detailCards"></div></section>
 <section class="panel span-6"><div class="head"><h2>系统自检</h2><button onclick="selfCheck()">执行</button></div><div id="selfRows" class="list">-</div></section>
-<section class="panel span-6"><div class="head"><h2>历史运行</h2><button onclick="historyLoad()">加载</button></div><div class="scroll"><table><thead><tr><th>时间</th><th>类型</th><th>标签</th><th>策略</th><th>交集</th><th>质量</th><th>耗时</th></tr></thead><tbody id="historyRows"></tbody></table></div></section>
+<section class="panel span-6"><div class="head"><h2>历史运行</h2><button onclick="historyLoad()">加载</button></div><div class="scroll"><table><thead><tr><th>时间</th><th>类型</th><th>模式</th><th>标签</th><th>策略</th><th>交集</th><th>质量</th><th>耗时</th></tr></thead><tbody id="historyRows"></tbody></table></div></section>
 </div>
 </main>
 <script>
@@ -99,7 +99,13 @@ function strategyMetricText(x){const m=(x||{}).strategy_metrics||{};return m.com
 function strategyMetricDetail(x){const m=(x||{}).strategy_metrics||{};return m.detail||m.compact||''}
 function strategyMetricLine(x){const text=strategyMetricText(x);if(!text)return '';return `<span class="metricline" title="${esc(strategyMetricDetail(x))}">${esc(text)}</span>`}
 function sentimentCard(s){const t=(s||{}).timing||{};const group=t.state_group||'';const cls=group==='risk_on'?'ok':(group==='risk_off'?'bad':'warnc');return (s&&s.ok)?`<span class="${cls}">${esc(t.state||'-')}</span>`:'<span class="warnc">待核</span>'}
-function tailPushCard(t){if(!t||!t.exists)return '<span class="warnc">暂无</span>';if(t.mode==='test')return t.pushed?`<span class="warnc">测试推${t.push_count||1}</span>`:'<span class="warnc">测试</span>';if(t.pushed)return `<span class="ok">已推${t.push_count||1}</span>`;if(t.ok)return '<span class="warnc">未推</span>';return '<span class="bad">失败</span>'}
+function tailPushCard(t){
+  if(!t||!t.exists)return '<span class="warnc">暂无</span>';
+  if(t.mode==='test')return t.pushed?`<span class="warnc">测试推${t.push_count||1}</span>`:'<span class="warnc">仅测试</span>';
+  if(t.pushed)return `<span class="ok">正式${t.push_count||1}</span>`;
+  if(t.ok)return '<span class="warnc">正式未推</span>';
+  return '<span class="bad">正式失败</span>'
+}
 function renderHealth(h){
   h=h||{};const blocking=Number(h.blocking||0);const warnings=Number(h.warnings||0);const ok=h.status==='pass'&&blocking===0;
   $('ha').innerHTML=ok?(warnings?`<span class="warnc">${warnings}提</span>`:'<span class="ok">通过</span>'):`<span class="bad">${blocking}阻</span>`;
@@ -257,7 +263,7 @@ function renderCards(rows){let html='';rows.forEach(s=>{html+=`<section class="p
 async function selfCheck(){const d=await api('/self-check');let html=`<div class="item">硬阻断：${d.blocking||0}，提醒：${d.warnings||0}</div>`;(d.checks||[]).forEach(c=>{html+=`<div class="item">${tag(c.ok,c.warning)} <b>${esc(c.name)}</b>：${esc(c.detail)}</div>`});$('selfRows').innerHTML=html}
 async function healthCheck(){try{const d=await api('/health');renderHealth(d);notice('健康审计已刷新',true)}catch(e){notice('健康审计失败: '+e,false)}}
 async function tailReady(){const d=await api('/tail-readiness');let html=`<div>窗口：<b>${esc(d.window_state)}</b> ${esc(d.window_start)}-${esc(d.window_end)}，间隔 ${d.interval_seconds}s，最多 ${d.max_pushes} 轮</div><div>状态：${d.can_push?'<span class="ok">可推送</span>':'<span class="bad">不可推送/非窗口</span>'}，阻断 ${d.blocking||0}，提醒 ${d.warnings||0}</div>`;(d.checks||[]).forEach(c=>{html+=`<div>${tag(c.ok,c.warning)} ${esc(c.name)}：${esc(c.detail)}</div>`});$('tailBox').innerHTML=html}
-async function historyLoad(){const d=await api('/history?n=12');let html='';(d.pipelines||[]).forEach(p=>{html+=`<tr><td>${esc((p.timestamp||'').replace('T',' ').slice(0,19))}</td><td>分析</td><td>${esc(p.tail_label||'')}</td><td>${p.strategies_ok}/${p.strategies_run}</td><td>${p.overlap_candidates}</td><td>${tag(p.quality_ok!==false,p.quality_ok===undefined)}</td><td>${Number(p.elapsed||0).toFixed(1)}s</td></tr>`});(d.tails||[]).forEach(t=>{html+=`<tr><td>${esc((t.started_at||t._mtime||'').replace('T',' ').slice(0,19))}</td><td>尾盘</td><td>${esc(t.label||'')}</td><td>${t.strategies_ok||0}</td><td>${t.overlap_candidates||0}</td><td>${tag(t.ok)}</td><td>${Number(t.elapsed_seconds||0).toFixed(1)}s</td></tr>`});$('historyRows').innerHTML=html||'<tr><td colspan="7" class="empty">暂无历史</td></tr>'}
+async function historyLoad(){const d=await api('/history?n=12');let html='';(d.pipelines||[]).forEach(p=>{html+=`<tr><td>${esc((p.timestamp||'').replace('T',' ').slice(0,19))}</td><td>分析</td><td>-</td><td>${esc(p.tail_label||'')}</td><td>${p.strategies_ok}/${p.strategies_run}</td><td>${p.overlap_candidates}</td><td>${tag(p.quality_ok!==false,p.quality_ok===undefined)}</td><td>${Number(p.elapsed||0).toFixed(1)}s</td></tr>`});(d.tails||[]).forEach(t=>{const mode=t.mode==='formal'?'正式':'测试';html+=`<tr><td>${esc((t.started_at||t._mtime||'').replace('T',' ').slice(0,19))}</td><td>尾盘</td><td>${esc(mode)}</td><td>${esc(t.label||'')}</td><td>${t.strategies_ok||0}</td><td>${t.overlap_candidates||0}</td><td>${tag(t.ok)}</td><td>${Number(t.elapsed_seconds||0).toFixed(1)}s</td></tr>`});$('historyRows').innerHTML=html||'<tr><td colspan="8" class="empty">暂无历史</td></tr>'}
 function setJobBusy(running){
   document.querySelectorAll('button[onclick*="startJob"],button[data-job-button]').forEach(b=>{b.disabled=running});
   const bar=$('jobProgress');if(bar)bar.classList.toggle('active',running);

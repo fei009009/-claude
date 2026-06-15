@@ -757,11 +757,15 @@ def _latest_health_report() -> Dict[str, Any]:
 
 def _load_latest_tails(n: int = 10) -> list[Dict[str, Any]]:
     rows = []
+    from src.settings import load_settings
+
+    cfg = load_settings()
     for path in sorted(_json_dir().glob("tail_v2_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:n]:
         data = _load_json(path)
         if data is not None:
             data["_file"] = path.name
             data["_mtime"] = datetime.fromtimestamp(path.stat().st_mtime).isoformat(timespec="seconds")
+            data["mode"] = _tail_record_mode(data, cfg)
             rows.append(data)
     return rows
 
@@ -776,14 +780,22 @@ def _tail_record_mode(row: Dict[str, Any], cfg: Dict[str, Any]) -> str:
 
 
 def _latest_tail_summary(cfg: Dict[str, Any]) -> Dict[str, Any]:
-    rows = _load_latest_tails(1)
+    rows = _load_latest_tails(20)
     if not rows:
         return {"exists": False}
-    row = dict(rows[0])
-    mode = _tail_record_mode(row, cfg)
+    latest_any = dict(rows[0])
+    latest_formal = next((dict(row) for row in rows if row.get("mode") == "formal"), None)
+    latest_test = next((dict(row) for row in rows if row.get("mode") == "test"), None)
+    row = latest_formal or latest_any
+    mode = str(row.get("mode") or _tail_record_mode(row, cfg))
     return {
         "exists": True,
         "mode": mode,
+        "has_formal": latest_formal is not None,
+        "latest_any_mode": latest_any.get("mode", ""),
+        "latest_any_file": latest_any.get("_file", ""),
+        "latest_test_file": (latest_test or {}).get("_file", ""),
+        "latest_test_mtime": (latest_test or {}).get("_mtime", ""),
         "file": row.get("_file", ""),
         "mtime": row.get("_mtime", ""),
         "label": row.get("label", row.get("tail_label", "")),
