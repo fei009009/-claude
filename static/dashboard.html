@@ -29,7 +29,7 @@ label{display:inline-flex;align-items:center;gap:3px;color:var(--muted)}input[ty
       <div class="action-row">
         <div class="action-group"><span class="group-title">数据</span><button onclick="startJob('quality')">质检</button><button onclick="startJob('native-snapshot')">原生快照</button><button onclick="startJob('snapshot-prepare')">准备快照</button><button onclick="startJob('run')">完整分析</button></div>
         <div class="action-group"><span class="group-title">盘后</span><button onclick="startJob('tracking-ingest')">追踪入库</button><button onclick="startJob('outcome-update')">收益回填</button><button onclick="startJob('factor-panel')">因子宽表</button><button onclick="startJob('factor-eval')">因子验证</button><button onclick="startJob('tradeability')">可交易</button><button onclick="startJob('pattern-tags')">模式标签</button><button onclick="startJob('post-market-refresh')">盘后刷新</button></div>
-        <div class="action-group"><span class="group-title">工具</span><button onclick="startJob('sentiment-status')">情绪周期</button><button class="warn" onclick="startJob('test-push')">测试推送</button></div>
+        <div class="action-group"><span class="group-title">工具</span><button onclick="startJob('sentiment-status')">情绪周期</button><button onclick="startJob('windows-tasks')">计划任务</button><button class="warn" onclick="startJob('test-push')">测试推送</button></div>
       </div>
     </div>
   </div>
@@ -269,6 +269,11 @@ async function tailReady(){
   let status=d.can_push?'<span class="ok">可推送</span>':(d.blocking?'<span class="bad">质量阻断</span>':'<span class="warnc">等待窗口</span>');
   let html=`<div>窗口：<b>${esc(tailWindowText(d.window_state))}</b> ${esc(d.window_start)}-${esc(d.window_end)}，目标启动间隔 ${d.interval_seconds}s，最多 ${d.max_pushes} 轮</div>`;
   html+=`<div>状态：${status}，阻断 ${d.blocking||0}，提醒 ${d.warnings||0}${firstBlock?'；首个阻断：'+esc(firstBlock.detail||firstBlock.name):''}</div>`;
+  const wt=d.windows_tasks||{};const tasks=wt.tasks||[];
+  if(tasks.length){
+    html+=`<div>自动任务：${wt.ok?'<span class="ok">已注册</span>':'<span class="bad">需修复</span>'}，${wt.count||0}/${wt.total||tasks.length}</div>`;
+    tasks.forEach(t=>{html+=`<div>${t.exists?tag(true):tag(false)} ${esc(t.name||'')}：${esc(t.next_run_time||'-')}；${esc(t.task_to_run||t.expected_script||'')}</div>`})
+  }
   (d.checks||[]).forEach(c=>{html+=`<div>${tag(c.ok,c.warning)} ${esc(c.name)}：${esc(c.detail)}</div>`});
   $('tailBox').innerHTML=html
 }

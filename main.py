@@ -34,6 +34,7 @@ from src.tradeability_filter import build_tradeability_report
 from src.tracking_outcomes import outcome_report, update_outcomes
 from src.tracking_store import ingest_pipeline_file, ingest_pipelines, summarize_tracking
 from src.wecom_push import build_run_markdown, push_test_markdown, push_wecom
+from src.windows_tasks import delete_tasks, install_tasks, query_tasks
 from src.x1_preheat import latest_status as x1_preheat_status, run_preheat as run_x1_preheat, select_tail_snapshot
 
 
@@ -726,6 +727,33 @@ def cmd_tradeability(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_windows_tasks(args: argparse.Namespace) -> int:
+    if args.action == "install":
+        report = install_tasks()
+    elif args.action == "delete":
+        report = delete_tasks()
+    else:
+        report = query_tasks()
+
+    title = {"install": "安装/修复", "delete": "删除", "status": "状态"}[args.action]
+    print(f"Windows计划任务{title}: {'OK' if report.get('ok') else 'WARN'}")
+    for row in report.get("tasks") or report.get("results") or []:
+        print(
+            f"  {row.get('name')} | "
+            f"{'存在' if row.get('exists', row.get('ok')) else '缺失/失败'} | "
+            f"next={row.get('next_run_time', '-')} | "
+            f"last={row.get('last_run_time', '-')} | "
+            f"result={row.get('last_result', row.get('returncode', '-'))}"
+        )
+        if row.get("task_to_run"):
+            print(f"    run: {row.get('task_to_run')}")
+        if row.get("script"):
+            print(f"    script: {row.get('script')}")
+        if row.get("stderr"):
+            print(f"    err: {row.get('stderr')}")
+    return 0 if report.get("ok") else 2
+
+
 def cmd_outcome_update(args: argparse.Namespace) -> int:
     cfg = load_settings()
     ensure_output_dirs(cfg)
@@ -1014,6 +1042,10 @@ def main() -> int:
     post_market.add_argument("--min-samples", type=int, default=3)
     post_market.add_argument("--eval-min-samples", type=int, default=20)
     post_market.set_defaults(func=cmd_post_market_refresh)
+
+    windows_tasks = sub.add_parser("windows-tasks", help="查看/安装/删除 V2.0 Windows 自动计划任务")
+    windows_tasks.add_argument("action", choices=["status", "install", "delete"], nargs="?", default="status")
+    windows_tasks.set_defaults(func=cmd_windows_tasks)
 
     health = sub.add_parser("health", help="端到端健康审计：数据、策略、XGB、X1Beam、追踪")
     health.add_argument("--official", action="store_true", help="按正式尾盘口径检查交易日")

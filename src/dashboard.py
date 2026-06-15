@@ -33,6 +33,7 @@ _job_status: Dict[str, Any] = {
 _quality_cache: Dict[str, Any] = {"expires": 0.0, "snapshot_dir": "", "source": "", "quality": None}
 _name_map_cache: Dict[str, Any] = {"key": "", "expires": 0.0, "map": {}}
 _health_cache: Dict[str, Any] = {"expires": 0.0, "report": None}
+_tasks_cache: Dict[str, Any] = {"expires": 0.0, "report": None}
 
 
 def _json_bytes(data: Any) -> bytes:
@@ -733,6 +734,20 @@ def _health_status(cfg: Dict[str, Any]) -> Dict[str, Any]:
     return compact
 
 
+def _windows_tasks_status() -> Dict[str, Any]:
+    now_ts = time.time()
+    if _tasks_cache.get("report") is not None and float(_tasks_cache.get("expires", 0) or 0) > now_ts:
+        return dict(_tasks_cache.get("report") or {})
+    try:
+        from src.windows_tasks import query_tasks
+
+        report = query_tasks()
+    except Exception as exc:
+        report = {"ok": False, "error": str(exc), "tasks": []}
+    _tasks_cache.update({"expires": now_ts + 60, "report": report})
+    return report
+
+
 def _latest_health_report() -> Dict[str, Any]:
     report_dir = ROOT / "outputs" / "reports"
     files = sorted(report_dir.glob("health_audit_*.json"), key=lambda p: p.stat().st_mtime, reverse=True) if report_dir.exists() else []
@@ -974,6 +989,7 @@ def _v2_status() -> Dict[str, Any]:
         "evolution": build_evolution_status(cfg),
         "sentiment": build_sentiment_regime(cfg),
         "health": _health_status(cfg),
+        "windows_tasks": _windows_tasks_status(),
         "latest_tail": _latest_tail_summary(cfg),
         "latest_run": None,
         "boundary": None,
@@ -1113,6 +1129,7 @@ def _tail_readiness() -> Dict[str, Any]:
         "checks": report.get("checks", []),
         "can_push": state == "during" and report.get("blocking", 0) == 0,
         "status": report.get("status", "blocked"),
+        "windows_tasks": _windows_tasks_status(),
     }
 
 
@@ -1296,6 +1313,7 @@ class Handler(BaseHTTPRequestHandler):
             "outcome-update",
             "post-market-refresh",
             "sentiment-status",
+            "windows-tasks",
         }
         if cmd not in allowed:
             self._json({"ok": False, "error": f"unknown command: {cmd}"}, code=400)
