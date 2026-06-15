@@ -386,55 +386,86 @@ def _short_text(value: Any, limit: int = 46) -> str:
     return text[: max(0, limit - 1)] + "…"
 
 
+def _metric_field(label: str, value: Any, *, short: int = 36) -> Dict[str, str]:
+    return {"label": label, "value": _short_text(value, short)}
+
+
+def _metric_text(fields: list[Dict[str, str]], labels: list[str]) -> str:
+    by_label = {item["label"]: item["value"] for item in fields}
+    parts = []
+    for label in labels:
+        value = by_label.get(label)
+        if value not in (None, ""):
+            parts.append(f"{label} {value}")
+    return " | ".join(parts)
+
+
 def _strategy_metrics(strategy_key: str, row: Dict[str, Any]) -> Dict[str, Any]:
     key = str(strategy_key or "").lower()
     if key == "v10":
-        compact = (
-            f"P80 {row.get('p80_count', '-')} | "
-            f"Lift {_fmt_num(row.get('lift_score'), 2)} | "
-            f"WR28 {_fmt_pct_value(row.get('wr28'), 1)} | "
-            f"+{row.get('positive_count', 0)}/-{row.get('negative_count', 0)}"
-        )
-        detail = (
-            f"{compact} | LU1 {_fmt_pct_value(row.get('top_lu1_rate'), 1)} | "
-            f"规则 {_short_text(row.get('top_rule'), 120)}"
-        )
-        return {"template": "V10", "compact": compact, "detail": detail}
+        fields = [
+            _metric_field("P80", row.get("p80_count", "-")),
+            _metric_field("Lift", _fmt_num(row.get("lift_score"), 2)),
+            _metric_field("WR28", _fmt_pct_value(row.get("wr28"), 1)),
+            _metric_field("正/负", f"{row.get('positive_count', 0)}/{row.get('negative_count', 0)}"),
+            _metric_field("LU1", _fmt_pct_value(row.get("top_lu1_rate"), 1)),
+            _metric_field("B/C", f"{row.get('in_group_b', '-')}/{row.get('in_group_c', '-')}"),
+            _metric_field("YZ016", _fmt_num(row.get("yz016"), 1)),
+            _metric_field("J", _fmt_num(row.get("j"), 1)),
+            _metric_field("RSI24", _fmt_num(row.get("rsi24"), 1)),
+            _metric_field("DC20", _fmt_num(row.get("dc_p20"), 1)),
+            _metric_field("规则", row.get("top_rule"), short=120),
+        ]
+        compact = _metric_text(fields, ["P80", "Lift", "WR28", "正/负"])
+        secondary = _metric_text(fields, ["LU1", "B/C", "YZ016", "J", "RSI24", "DC20"])
+        detail = f"{compact} | {secondary} | 规则 {_short_text(row.get('top_rule'), 160)}"
+        return {"template": "V10", "compact": compact, "secondary": secondary, "detail": detail, "fields": fields}
     if key == "v1":
-        compact = (
-            f"+{row.get('positive_count', 0)}/-{row.get('negative_count', 0)} | "
-            f"LU1 {_fmt_pct_value(row.get('top_lu1_rate'), 1)} | "
-            f"负LU1 {_fmt_pct_value(row.get('top_negative_lu1_rate'), 1)}"
-        )
-        detail = (
-            f"{compact} | LU5 {_fmt_pct_value(row.get('top_lu5_rate'), 1)} | "
-            f"规则 {_short_text(row.get('top_rule'), 120)}"
-        )
-        return {"template": "V1", "compact": compact, "detail": detail}
+        fields = [
+            _metric_field("正/负", f"{row.get('positive_count', 0)}/{row.get('negative_count', 0)}"),
+            _metric_field("LU1", _fmt_pct_value(row.get("top_lu1_rate"), 1)),
+            _metric_field("LU5", _fmt_pct_value(row.get("top_lu5_rate"), 1)),
+            _metric_field("负LU1", _fmt_pct_value(row.get("top_negative_lu1_rate"), 1)),
+            _metric_field("价格", _fmt_num(row.get("price"), 2)),
+            _metric_field("涨幅", _fmt_pct_value(row.get("pct_chg"), 2)),
+            _metric_field("规则", row.get("top_rule"), short=120),
+        ]
+        compact = _metric_text(fields, ["正/负", "LU1", "LU5", "负LU1"])
+        secondary = _metric_text(fields, ["价格", "涨幅", "规则"])
+        detail = f"{compact} | {secondary}"
+        return {"template": "V1", "compact": compact, "secondary": secondary, "detail": detail, "fields": fields}
     if key == "v4":
-        compact = (
-            f"命中 {row.get('match_count', '-')} | "
-            f"LU1 {_fmt_pct_value(row.get('top_lu1_rate'), 1)} | "
-            f"LU5 {_fmt_pct_value(row.get('top_lu5_rate'), 1)}"
-        )
-        detail = (
-            f"{compact} | MaxH {_fmt_pct_value(row.get('top_maxh_win'), 1)} | "
-            f"Cls {_fmt_pct_value(row.get('top_cls_win'), 1)} | "
-            f"规则 {_short_text(row.get('top_rule'), 120)}"
-        )
-        return {"template": "V4", "compact": compact, "detail": detail}
+        fields = [
+            _metric_field("命中", row.get("match_count", "-")),
+            _metric_field("LU1", _fmt_pct_value(row.get("top_lu1_rate"), 1)),
+            _metric_field("LU5", _fmt_pct_value(row.get("top_lu5_rate"), 1)),
+            _metric_field("MaxH", _fmt_pct_value(row.get("top_maxh_win"), 1)),
+            _metric_field("Cls", _fmt_pct_value(row.get("top_cls_win"), 1)),
+            _metric_field("价格", _fmt_num(row.get("price"), 2)),
+            _metric_field("涨幅", _fmt_pct_value(row.get("pct_chg"), 2)),
+            _metric_field("标签", row.get("tag", "")),
+            _metric_field("规则", row.get("top_rule"), short=120),
+        ]
+        compact = _metric_text(fields, ["命中", "LU1", "LU5", "MaxH", "Cls"])
+        secondary = _metric_text(fields, ["价格", "涨幅", "规则"])
+        detail = f"{compact} | {secondary}"
+        return {"template": "V4", "compact": compact, "secondary": secondary, "detail": detail, "fields": fields}
     if key == "x1beam":
-        compact = (
-            f"WR {_fmt_ratio_pct(row.get('wr'), 1)} | "
-            f"Lift {_fmt_num(row.get('lift'), 2)} | "
-            f"组合 {row.get('matched_combos', '-')}"
-        )
-        detail = (
-            f"{compact} | AvgWR {_fmt_ratio_pct(row.get('avg_wr'), 1)} | "
-            f"层级 {row.get('tier', '-')} | 路径 {_short_text(row.get('top_path'), 140)}"
-        )
-        return {"template": "X1Beam", "compact": compact, "detail": detail}
-    return {"template": strategy_key, "compact": "", "detail": ""}
+        fields = [
+            _metric_field("WR", _fmt_ratio_pct(row.get("wr"), 1)),
+            _metric_field("Lift", _fmt_num(row.get("lift"), 2)),
+            _metric_field("AvgWR", _fmt_ratio_pct(row.get("avg_wr"), 1)),
+            _metric_field("组合", row.get("matched_combos", "-")),
+            _metric_field("层级", row.get("tier", "-")),
+            _metric_field("价格", _fmt_num(row.get("price"), 2)),
+            _metric_field("涨幅", _fmt_pct_value(row.get("pct_chg"), 2)),
+            _metric_field("路径", row.get("top_path"), short=140),
+        ]
+        compact = _metric_text(fields, ["WR", "Lift", "AvgWR", "组合", "层级"])
+        secondary = _metric_text(fields, ["价格", "涨幅", "路径"])
+        detail = f"{compact} | {secondary}"
+        return {"template": "X1Beam", "compact": compact, "secondary": secondary, "detail": detail, "fields": fields}
+    return {"template": strategy_key, "compact": "", "secondary": "", "detail": "", "fields": []}
 
 
 def _clean_boundary(boundary: Dict[str, Any], name_map: Dict[str, str]) -> Dict[str, Any]:
