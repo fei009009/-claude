@@ -156,6 +156,13 @@ function renderOverlaps(rows){let html='';rows.forEach(o=>{const rk=o.ranks||{};
 function eventPct(v){const n=Number(v||0);return Number.isFinite(n)?(n*100).toFixed(1)+'%':'-'}
 function richOf(p){return (p.extra||{}).rich_report||(p.rich_report)||(((p.diagnosis||{}).extra||{}).rich_report)||((p.diagnosis||{}).rich_report)||{}}
 function eventsOf(p){return (p.extra||{}).event_probabilities||(((p.diagnosis||{}).extra||{}).event_probabilities)||{}}
+function xgbScore(p){return Number((p.blended_score??p.score??0)*100).toFixed(1)}
+function xgbCompact(p){const rr=richOf(p);return p.diagnosis_compact||p.diagnosis_badge||p.compact||rr.headline||p.recommendation||''}
+function rankLine(r){return Object.entries(r||{}).map(([k,v])=>`${k.toUpperCase()}#${v}`).join(' ')}
+function renderXgbMini(p,meta){
+  const text=xgbCompact(p);const risks=(p.risk_flags||[]).slice(0,2).join('，');
+  return `<div class="item"><span class="tag ${sigClass(p.signal)}">${esc(p.signal||'-')}</span> <b>${esc(p.code)}</b> ${esc(p.name||'')} <span class="sub">${xgbScore(p)}%${meta?' | '+esc(meta):''}</span><div class="sub wrap">${esc(text||'-')}${risks?'；风险：'+esc(risks):''}</div></div>`
+}
 function renderXgb(x){
   if(!x){$('xgbBox').innerHTML='<div class="empty">未运行诊断</div>';return}
   const sd=x.signal_distribution||{};
@@ -164,6 +171,23 @@ function renderXgb(x){
   if(x.error)html+=`<div class="item bad">${esc(x.error)}</div>`;
   if(x.summary)html+=`<div class="item sub wrap">${esc(x.summary)}</div>`;
   if((x.skipped||[]).length){html+=`<div class="item warnc wrap">未诊断：${(x.skipped||[]).slice(0,12).map(s=>`${esc(s.code)} ${esc(s.name||'')}(${esc(s.reason||'')})`).join('；')}</div>`}
+  const overlaps=x.overlap_diagnostics||[];
+  if(overlaps.length){
+    html+='<div class="item"><b>多策略交集优先验证</b><div class="sub wrap">先看 2+ 策略共识票是否得到 XGB 支持，再看单策略候选。</div></div>';
+    overlaps.slice(0,8).forEach(p=>{const meta=`${p.strategy_count||0}策 ${(p.strategies||[]).join('+')} ${rankLine(p.ranks)}`.trim();html+=renderXgbMini(p,meta)})
+  }
+  const groups=x.strategy_diagnostics||[];
+  if(groups.length){
+    html+='<div class="item"><b>四策略分组验证</b><div class="sub wrap">V10 / V1 / V4 / X1Beam 各自 Top 候选的 XGB 复核。</div></div>';
+    groups.forEach(g=>{
+      const s=g.signal_distribution||{};
+      html+=`<div class="item"><b>${esc(g.name||g.key||'-')}</b> <span class="sub">Top${g.count||0}，已诊断 ${g.diagnosed_count||0}；强${s.STRONG_BUY||0}/买${s.BUY||0}/观${s.WATCH||0}/中${s.NEUTRAL||0}</span>`;
+      const top=(g.top||[]).slice(0,4);
+      if(top.length){html+='<div class="chips">';top.forEach(p=>{html+=`<span class="chip"><span class="tag ${sigClass(p.signal)}">${esc(p.signal||'-')}</span> <b>${esc(p.code)}</b> ${esc(p.name||'')} <span class="rank">#${p.rank||'-'} / ${xgbScore(p)}%</span><span class="diag">${esc(xgbCompact(p)||'-')}</span></span>`});html+='</div>'}
+      html+='</div>';
+    })
+  }
+  html+='<div class="item"><b>全候选诊断明细</b></div>';
   const merged=[];const seen=new Set();
   [...(x.top_picks||[]),...(x.watch_list||[]),...(x.results||[])].forEach(p=>{const c=p.code||'';if(!c||seen.has(c))return;seen.add(c);merged.push(p)});
   merged.slice(0,12).forEach(p=>{

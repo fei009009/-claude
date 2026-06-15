@@ -231,6 +231,123 @@ def _clean_diagnosis_summary_text(summary: str, items: list[Dict[str, Any]], nam
     return text
 
 
+def _diagnosis_by_code(rows: list[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    from src.common import norm_code
+
+    mapping: Dict[str, Dict[str, Any]] = {}
+    for row in rows or []:
+        code = norm_code(row.get("code"))
+        if code:
+            mapping[code] = row
+    return mapping
+
+
+def _signal_counts(rows: list[Dict[str, Any]]) -> Dict[str, int]:
+    counts = {"STRONG_BUY": 0, "BUY": 0, "WATCH": 0, "NEUTRAL": 0, "SKIP": 0, "NO_DIAG": 0}
+    for row in rows or []:
+        signal = str(row.get("signal") or "NO_DIAG")
+        counts[signal] = counts.get(signal, 0) + 1
+    return counts
+
+
+def _candidate_diagnosis_view(
+    row: Dict[str, Any],
+    name_map: Dict[str, str],
+    diag_by_code: Dict[str, Dict[str, Any]],
+    *,
+    rank: Any = None,
+    strategies: Optional[list[str]] = None,
+    ranks: Optional[Dict[str, Any]] = None,
+    strategy_count: Optional[int] = None,
+) -> Dict[str, Any]:
+    from src.common import norm_code
+
+    code = norm_code(row.get("code"))
+    source = dict(diag_by_code.get(code) or {})
+    if not source:
+        diag = row.get("diagnosis") if isinstance(row.get("diagnosis"), dict) else {}
+        source = {
+            "code": code,
+            "name": row.get("name", ""),
+            "signal": diag.get("signal", "NO_DIAG"),
+            "model_score": diag.get("model_score"),
+            "rule_score": diag.get("rule_score"),
+            "blended_score": diag.get("blended_score"),
+            "target_scores": diag.get("target_scores", {}),
+            "risk_flags": diag.get("risk_flags", []),
+            "recommendation": diag.get("recommendation", ""),
+            "diagnosis_badge": row.get("diagnosis_badge") or diag.get("badge", ""),
+            "diagnosis_compact": row.get("diagnosis_compact") or diag.get("compact", ""),
+        }
+        rich_report = diag.get("rich_report") if isinstance(diag.get("rich_report"), dict) else {}
+        if rich_report:
+            source["rich_report"] = rich_report
+    view = _clean_diagnosis_item(source, name_map)
+    view["code"] = code
+    view["name"] = _display_stock_name(code, row.get("name", view.get("name", "")), name_map)
+    view["rank"] = rank if rank not in (None, "") else row.get("rank")
+    view["strategies"] = list(strategies or row.get("strategies") or [])
+    view["strategy_count"] = strategy_count if strategy_count is not None else len(view["strategies"])
+    view["ranks"] = dict(ranks or row.get("ranks") or {})
+    view["diagnosis_badge"] = view.get("diagnosis_badge") or row.get("diagnosis_badge", "")
+    view["diagnosis_compact"] = view.get("diagnosis_compact") or row.get("diagnosis_compact", "") or view.get("recommendation", "")
+    return view
+
+
+def _overlap_diagnostics(pipeline: Dict[str, Any], name_map: Dict[str, str], diag_by_code: Dict[str, Dict[str, Any]]) -> list[Dict[str, Any]]:
+    rows: list[Dict[str, Any]] = []
+    for index, item in enumerate((pipeline.get("overlap") or {}).get("overlaps", []) or [], start=1):
+        if not isinstance(item, dict):
+            continue
+        rows.append(
+            _candidate_diagnosis_view(
+                item,
+                name_map,
+                diag_by_code,
+                rank=index,
+                strategies=list(item.get("strategies") or []),
+                ranks=dict(item.get("ranks") or {}),
+                strategy_count=int(item.get("strategy_count") or len(item.get("strategies") or [])),
+            )
+        )
+    return rows[:12]
+
+
+def _strategy_diagnostics(pipeline: Dict[str, Any], name_map: Dict[str, str], diag_by_code: Dict[str, Dict[str, Any]]) -> list[Dict[str, Any]]:
+    preferred_order = {"v10": 0, "v1": 1, "v4": 2, "x1beam": 3}
+    groups: list[Dict[str, Any]] = []
+    for result in pipeline.get("strategies", []) or []:
+        key = str(result.get("strategy_name") or result.get("display_name") or "").lower()
+        top = []
+        for index, row in enumerate(result.get("top", []) or [], start=1):
+            if not isinstance(row, dict):
+                continue
+            top.append(
+                _candidate_diagnosis_view(
+                    row,
+                    name_map,
+                    diag_by_code,
+                    rank=row.get("rank", index),
+                    strategies=[key] if key else [],
+                    ranks={key: row.get("rank", index)} if key else {},
+                    strategy_count=1,
+                )
+            )
+        groups.append(
+            {
+                "key": key,
+                "name": result.get("display_name", result.get("strategy_name", key or "?")),
+                "ok": bool(result.get("ok")),
+                "count": len(result.get("top", []) or []),
+                "diagnosed_count": len([row for row in top if row.get("signal") and row.get("signal") != "NO_DIAG"]),
+                "signal_distribution": _signal_counts(top),
+                "top": top[:6],
+            }
+        )
+    groups.sort(key=lambda row: (preferred_order.get(str(row.get("key")), 99), str(row.get("name") or "")))
+    return groups
+
+
 def _clean_boundary(boundary: Dict[str, Any], name_map: Dict[str, str]) -> Dict[str, Any]:
     cleaned = {"stats": boundary.get("stats", {})}
     for key in ("risks", "candidates"):
@@ -626,6 +743,7 @@ def _diagnosis_summary(pipeline: Dict[str, Any], name_map: Dict[str, str]) -> Op
     ]
     if not diag and not raw_results:
         return None
+    diag_by_code = _diagnosis_by_code(raw_results)
     signals = diag.get("signal_distribution") or {}
     if raw_results and not signals:
         for item in raw_results:
@@ -668,6 +786,8 @@ def _diagnosis_summary(pipeline: Dict[str, Any], name_map: Dict[str, str]) -> Op
         "skipped": skipped[:30],
         "signal_distribution": signals,
         "results": raw_results[:30],
+        "overlap_diagnostics": _overlap_diagnostics(pipeline, name_map, diag_by_code),
+        "strategy_diagnostics": _strategy_diagnostics(pipeline, name_map, diag_by_code),
         "top_picks": top_picks,
         "watch_list": watch_list,
         "report_path": diag.get("report_path", ""),
