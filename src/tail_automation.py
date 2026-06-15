@@ -47,6 +47,19 @@ def _write_json(path: Path, payload: Dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _tail_status_payload(cycle: Dict[str, Any]) -> Dict[str, Any]:
+    drop = {"results", "overlap", "diagnosis_results"}
+    clean = {key: value for key, value in cycle.items() if key not in drop}
+    clean["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    return clean
+
+
+def _persist_tail_current(cfg: Dict[str, Any], cycle: Dict[str, Any]) -> Path:
+    path = _json_dir(cfg) / "tail_v2_current.json"
+    _write_json(path, _tail_status_payload(cycle))
+    return path
+
+
 def _persist_pipeline(
     cfg: Dict[str, Any],
     snapshot_dir: Path,
@@ -81,10 +94,10 @@ def _persist_pipeline(
 
 
 def _persist_tail_status(cfg: Dict[str, Any], cycle: Dict[str, Any]) -> Path:
-    path = _json_dir(cfg) / f"tail_v2_{datetime.now():%Y%m%d_%H%M%S}.json"
-    drop = {"results", "overlap", "diagnosis_results"}
-    clean = {key: value for key, value in cycle.items() if key not in drop}
+    path = _json_dir(cfg) / f"tail_v2_{datetime.now():%Y%m%d_%H%M%S_%f}.json"
+    clean = _tail_status_payload(cycle)
     _write_json(path, clean)
+    _write_json(_json_dir(cfg) / "tail_v2_current.json", clean)
     return path
 
 
@@ -237,7 +250,7 @@ def _run_cycle(snapshot_dir: Path, cfg: Dict[str, Any], label: str, quality: Opt
     return cycle
 
 
-def run_tail_once(cfg: Dict[str, Any], push: bool = True, label: str = "once") -> Dict[str, Any]:
+def run_tail_once(cfg: Dict[str, Any], push: bool = True, label: str = "once", persist_status: bool = True) -> Dict[str, Any]:
     active_snapshot_dir, active_source = resolve_snapshot(cfg)
     snapshot_dir, source, preheat_status = select_tail_snapshot(cfg, active_snapshot_dir)
     _emit(f"快照: {snapshot_dir} ({source})")
@@ -261,9 +274,14 @@ def run_tail_once(cfg: Dict[str, Any], push: bool = True, label: str = "once") -
             "x1_preheat": preheat_status,
             "elapsed_seconds": 0,
             "started_at": datetime.now().isoformat(timespec="seconds"),
+            "stage": "blocked",
+            "running": False,
         }
-        status_path = _persist_tail_status(cfg, cycle)
-        cycle["status_path"] = str(status_path)
+        if persist_status:
+            status_path = _persist_tail_status(cfg, cycle)
+            cycle["status_path"] = str(status_path)
+        else:
+            _persist_tail_current(cfg, cycle)
         _emit(f"阻断正式出票: {error}")
         return cycle
 
@@ -274,6 +292,8 @@ def run_tail_once(cfg: Dict[str, Any], push: bool = True, label: str = "once") -
     cycle["active_snapshot_dir"] = str(active_snapshot_dir)
     cycle["active_snapshot_source"] = active_source
     cycle["x1_preheat"] = preheat_status
+    cycle["stage"] = "analysis_done"
+    cycle["running"] = False
 
     pipeline_path = _persist_pipeline(cfg, snapshot_dir, quality, cycle)
     cycle["pipeline_path"] = str(pipeline_path)
@@ -300,8 +320,11 @@ def run_tail_once(cfg: Dict[str, Any], push: bool = True, label: str = "once") -
             cycle["pushed"] = False
             _emit(f"推送异常: {exc}")
 
-    status_path = _persist_tail_status(cfg, cycle)
-    cycle["status_path"] = str(status_path)
+    if persist_status:
+        status_path = _persist_tail_status(cfg, cycle)
+        cycle["status_path"] = str(status_path)
+    else:
+        _persist_tail_current(cfg, cycle)
     return cycle
 
 
@@ -316,12 +339,49 @@ def run_tail_watch(
     end = _at(str(tail.get("end_time", "14:57:00")))
     interval = int(tail.get("interval_seconds", 60))
     max_pushes = int(tail.get("max_pushes", 3))
+    min_pushes = int(tail.get("min_pushes", 2))
 
     _banner("尾盘监控 V2.0")
-    _emit(f"窗口: {start:%H:%M:%S} - {end:%H:%M:%S} | 间隔 {interval}s | 最多推送 {max_pushes} 轮")
+    _emit(f"窗口: {start:%H:%M:%S} - {end:%H:%M:%S} | 间隔 {interval}s | 目标推送 {min_pushes}-{max_pushes} 轮")
+    watch_started_at = datetime.now().isoformat(timespec="seconds")
+    watch_mode = "test" if no_wait else "formal"
+    _persist_tail_current(
+        cfg,
+        {
+            "label": "尾盘监控",
+            "mode": watch_mode,
+            "stage": "preheating" if not no_wait else "running",
+            "running": True,
+            "ok": False,
+            "pushed": False,
+            "cycle_count": 0,
+            "accepted_cycle_count": 0,
+            "push_count": 0,
+            "min_pushes": min_pushes,
+            "max_pushes": max_pushes,
+            "started_at": watch_started_at,
+        },
+    )
 
     if not no_wait:
         _maybe_preheat_x1_before_tail(cfg, start)
+        _persist_tail_current(
+            cfg,
+            {
+                "label": "尾盘监控",
+                "mode": watch_mode,
+                "stage": "waiting_window",
+                "running": True,
+                "ok": False,
+                "pushed": False,
+                "cycle_count": 0,
+                "accepted_cycle_count": 0,
+                "push_count": 0,
+                "min_pushes": min_pushes,
+                "max_pushes": max_pushes,
+                "started_at": watch_started_at,
+            },
+        )
         _emit("等待尾盘窗口...")
         while datetime.now() < start:
             time.sleep(max(1, min(30, (start - datetime.now()).total_seconds())))
@@ -352,14 +412,43 @@ def run_tail_watch(
 
         label = f"第{cycles + 1}轮"
         due_at = next_due
-        cycle = run_tail_once(cfg, push=False, label=label)
+        _persist_tail_current(
+            cfg,
+            {
+                "label": label,
+                "mode": watch_mode,
+                "stage": "cycle_running",
+                "running": True,
+                "ok": False,
+                "pushed": False,
+                "cycle_count": cycles + 1,
+                "accepted_cycle_count": accepted,
+                "push_count": pushes,
+                "min_pushes": min_pushes,
+                "max_pushes": max_pushes,
+                "target_start_at": due_at.isoformat(timespec="seconds"),
+                "started_at": datetime.now().isoformat(timespec="seconds"),
+            },
+        )
+        cycle = run_tail_once(cfg, push=False, label=label, persist_status=False)
         cycles += 1
         cycle["target_start_at"] = due_at.isoformat(timespec="seconds")
+        cycle["cycle_count"] = cycles
+        cycle["accepted_cycle_count"] = accepted
+        cycle["push_count"] = pushes
+        cycle["min_pushes"] = min_pushes
+        cycle["max_pushes"] = max_pushes
+        cycle["mode"] = watch_mode
+        cycle["stage"] = "analysis_done"
+        cycle["running"] = True
 
         if cycle.get("ok"):
             accepted += 1
+            cycle["accepted_cycle_count"] = accepted
             if push and pushes < max_pushes:
                 try:
+                    cycle["stage"] = "pushing"
+                    _persist_tail_current(cfg, cycle)
                     markdown = build_run_markdown(
                         cycle.get("results", []),
                         cycle.get("overlap", {}),
@@ -373,14 +462,20 @@ def run_tail_watch(
                         cycle["pushed"] = True
                         cycle["pushed_at"] = datetime.now().isoformat(timespec="seconds")
                         cycle["push_count"] = pushes
+                        cycle["stage"] = "pushed"
+                        cycle["running"] = False
                         _emit(f"{label} 推送成功 {pushes}/{max_pushes}")
                     else:
                         cycle["pushed"] = False
                         cycle["push_error"] = "push_wecom returned False"
+                        cycle["stage"] = "push_failed"
+                        cycle["running"] = False
                         _emit(f"{label} 推送失败")
                 except Exception as exc:
                     cycle["pushed"] = False
                     cycle["push_error"] = str(exc)
+                    cycle["stage"] = "push_failed"
+                    cycle["running"] = False
                     _emit(f"{label} 推送异常: {exc}")
                 try:
                     status_path = _persist_tail_status(cfg, cycle)
@@ -388,9 +483,18 @@ def run_tail_watch(
                     _emit(f"{label} 推送状态已刷新: {status_path.name}")
                 except Exception as exc:
                     _emit(f"{label} 推送状态刷新失败: {exc}")
+            else:
+                cycle["stage"] = "accepted_no_push"
+                cycle["running"] = False
+                status_path = _persist_tail_status(cfg, cycle)
+                cycle["status_path"] = str(status_path)
             if best_cycle is None or cycle.get("overlap_candidates", 0) > best_cycle.get("overlap_candidates", 0):
                 best_cycle = cycle
         else:
+            cycle["stage"] = "cycle_failed"
+            cycle["running"] = False
+            status_path = _persist_tail_status(cfg, cycle)
+            cycle["status_path"] = str(status_path)
             _emit(f"{label} 未通过: {cycle.get('error', '')}")
 
         next_due = due_at + timedelta(seconds=max(1, interval))
@@ -416,6 +520,8 @@ def run_tail_watch(
                 best_cycle["pushed"] = True
                 best_cycle["pushed_at"] = datetime.now().isoformat(timespec="seconds")
                 best_cycle["push_count"] = pushes
+                best_cycle["stage"] = "summary_pushed"
+                best_cycle["running"] = False
                 status_path = _persist_tail_status(cfg, best_cycle)
                 best_cycle["status_path"] = str(status_path)
                 _emit("汇总推送成功")
@@ -424,7 +530,25 @@ def run_tail_watch(
 
     _banner("尾盘监控完成")
     _emit(f"轮次 {cycles} | 通过 {accepted} | 推送 {pushes}/{max_pushes}")
-    return {"ok": accepted > 0, "cycle_count": cycles, "accepted_cycle_count": accepted, "push_count": pushes}
+    ok = accepted > 0 and (not push or pushes >= min(min_pushes, max_pushes))
+    final = dict(best_cycle or {})
+    final.update({
+        "label": "尾盘监控完成",
+        "mode": watch_mode,
+        "stage": "completed" if ok else "completed_below_min_pushes",
+        "running": False,
+        "ok": ok,
+        "pushed": pushes > 0,
+        "cycle_count": cycles,
+        "accepted_cycle_count": accepted,
+        "push_count": pushes,
+        "min_pushes": min_pushes,
+        "max_pushes": max_pushes,
+        "started_at": watch_started_at,
+        "error": "" if ok else f"推送轮次不足: {pushes}/{min_pushes}",
+    })
+    _persist_tail_current(cfg, final)
+    return {"ok": ok, "cycle_count": cycles, "accepted_cycle_count": accepted, "push_count": pushes}
 
 
 def _maybe_preheat_x1_before_tail(cfg: Dict[str, Any], tail_start: datetime) -> None:

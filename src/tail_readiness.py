@@ -118,10 +118,27 @@ def audit(cfg: Dict[str, Any], probe: bool = False) -> Dict[str, Any]:
     start = str(tail_cfg.get("start_time", "14:50:00"))
     end = str(tail_cfg.get("end_time", "14:57:00"))
     interval = int(tail_cfg.get("interval_seconds", 60))
+    min_pushes = int(tail_cfg.get("min_pushes", 2))
     max_pushes = int(tail_cfg.get("max_pushes", 3))
     min_ok = int(tail_cfg.get("min_strategy_success", 2))
     capacity = _capacity_minutes(start, end) * 60 // max(interval, 1)
-    add("尾盘窗口容量", capacity >= 2, f"{start}-{end}, 目标启动间隔 {interval}s, 理论 {capacity} 轮, 目标推送 {max_pushes} 轮")
+    add("尾盘窗口容量", capacity >= max(2, min_pushes), f"{start}-{end}, 目标启动间隔 {interval}s, 理论 {capacity} 轮, 目标推送 {min_pushes}-{max_pushes} 轮")
+    runtime = _recent_cycle_runtime(cfg)
+    if runtime.get("count"):
+        window_seconds = _capacity_minutes(start, end) * 60
+        estimate = float(runtime.get("max_elapsed", 0)) * max_pushes
+        add(
+            "尾盘实测耗时",
+            estimate <= window_seconds,
+            (
+                f"最近{runtime.get('count')}轮 avg={runtime.get('avg_elapsed', 0):.1f}s "
+                f"max={runtime.get('max_elapsed', 0):.1f}s；"
+                f"按{max_pushes}轮估算={estimate:.1f}s/窗口{window_seconds}s"
+            ),
+            warning=estimate > window_seconds,
+        )
+    else:
+        add("尾盘实测耗时", True, "尚无最近 pipeline 耗时样本，按配置窗口执行", warning=True)
     add("策略成功门槛", min_ok <= 2, f"成功策略 >= {min_ok} 才推送", warning=min_ok > 2)
 
     if probe:
@@ -136,7 +153,7 @@ def audit(cfg: Dict[str, Any], probe: bool = False) -> Dict[str, Any]:
         "warnings": warnings,
         "checks": checks,
         "snapshot_quality": quality,
-        "tail_window": {"start": start, "end": end, "interval_seconds": interval, "max_pushes": max_pushes},
+        "tail_window": {"start": start, "end": end, "interval_seconds": interval, "min_pushes": min_pushes, "max_pushes": max_pushes},
         "push_config": {"ok": has_wecom, "channels": channel_count},
         "quality_gate": quality_config(cfg),
         "x1_preheat": preheat_status,
@@ -277,6 +294,30 @@ def _capacity_minutes(start: str, end: str) -> int:
         return max(0, (eh * 60 + em) - (sh * 60 + sm))
     except Exception:
         return 0
+
+
+def _recent_cycle_runtime(cfg: Dict[str, Any], limit: int = 12) -> Dict[str, Any]:
+    root = Path(str((cfg.get("paths") or {}).get("output_root") or "outputs")) / "json"
+    if not root.exists():
+        return {"count": 0}
+    elapsed: List[float] = []
+    for path in sorted(root.glob("pipeline_v2_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:limit]:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            summary = payload.get("summary") or {}
+            value = float(summary.get("total_elapsed_seconds") or 0)
+            if value > 0:
+                elapsed.append(value)
+        except Exception:
+            continue
+    if not elapsed:
+        return {"count": 0}
+    return {
+        "count": len(elapsed),
+        "avg_elapsed": sum(elapsed) / len(elapsed),
+        "max_elapsed": max(elapsed),
+        "min_elapsed": min(elapsed),
+    }
 
 
 def _scheduled_tasks_ok() -> tuple[int, int]:

@@ -98,6 +98,7 @@ automation:
     start_time: "14:50:00"
     end_time: "14:57:00"
     interval_seconds: 60
+    min_pushes: 2
     max_pushes: 3
     push_policy: each_success_and_final
     min_strategy_success: 2

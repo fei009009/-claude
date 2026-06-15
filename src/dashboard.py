@@ -775,7 +775,11 @@ def _load_latest_tails(n: int = 10) -> list[Dict[str, Any]]:
     from src.settings import load_settings
 
     cfg = load_settings()
-    for path in sorted(_json_dir().glob("tail_v2_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:n]:
+    paths = [
+        path for path in _json_dir().glob("tail_v2_*.json")
+        if path.name != "tail_v2_current.json"
+    ]
+    for path in sorted(paths, key=lambda p: p.stat().st_mtime, reverse=True)[:n]:
         data = _load_json(path)
         if data is not None:
             data["_file"] = path.name
@@ -786,6 +790,8 @@ def _load_latest_tails(n: int = 10) -> list[Dict[str, Any]]:
 
 
 def _tail_record_mode(row: Dict[str, Any], cfg: Dict[str, Any]) -> str:
+    if row.get("mode") in {"formal", "test"}:
+        return str(row.get("mode"))
     tail = (cfg.get("automation") or {}).get("tail") or {}
     start = str(tail.get("start_time", "14:50:00"))
     end = str(tail.get("end_time", "14:57:00"))
@@ -796,16 +802,30 @@ def _tail_record_mode(row: Dict[str, Any], cfg: Dict[str, Any]) -> str:
 
 def _latest_tail_summary(cfg: Dict[str, Any]) -> Dict[str, Any]:
     rows = _load_latest_tails(20)
-    if not rows:
+    current_path = _json_dir() / "tail_v2_current.json"
+    current = _load_json(current_path) if current_path.exists() else None
+    if current is not None:
+        current["_file"] = current_path.name
+        current["_mtime"] = datetime.fromtimestamp(current_path.stat().st_mtime).isoformat(timespec="seconds")
+        current["mode"] = _tail_record_mode(current, cfg)
+    if not rows and not current:
         return {"exists": False}
-    latest_any = dict(rows[0])
+    latest_any = dict(current or rows[0])
+    if rows and current:
+        try:
+            if datetime.fromisoformat(str(rows[0].get("_mtime"))) > datetime.fromisoformat(str(current.get("_mtime"))):
+                latest_any = dict(rows[0])
+        except Exception:
+            pass
     latest_formal = next((dict(row) for row in rows if row.get("mode") == "formal"), None)
     latest_test = next((dict(row) for row in rows if row.get("mode") == "test"), None)
-    row = latest_formal or latest_any
+    row = latest_any if latest_any.get("_file") == "tail_v2_current.json" else (latest_formal or latest_any)
     mode = str(row.get("mode") or _tail_record_mode(row, cfg))
     return {
         "exists": True,
         "mode": mode,
+        "stage": row.get("stage", ""),
+        "running": bool(row.get("running")),
         "has_formal": latest_formal is not None,
         "latest_any_mode": latest_any.get("mode", ""),
         "latest_any_file": latest_any.get("_file", ""),
@@ -817,6 +837,10 @@ def _latest_tail_summary(cfg: Dict[str, Any]) -> Dict[str, Any]:
         "ok": bool(row.get("ok")),
         "pushed": bool(row.get("pushed")),
         "push_count": row.get("push_count", 1 if row.get("pushed") else 0),
+        "min_pushes": row.get("min_pushes"),
+        "max_pushes": row.get("max_pushes"),
+        "cycle_count": row.get("cycle_count"),
+        "accepted_cycle_count": row.get("accepted_cycle_count"),
         "strategies_ok": row.get("strategies_ok", 0),
         "strategies_run": row.get("strategies_run", 0),
         "overlap_candidates": row.get("overlap_candidates", 0),
@@ -1123,6 +1147,7 @@ def _tail_readiness() -> Dict[str, Any]:
         "window_start": tw.get("start", "14:50:00"),
         "window_end": tw.get("end", "14:57:00"),
         "interval_seconds": tw.get("interval_seconds", 60),
+        "min_pushes": tw.get("min_pushes", 2),
         "max_pushes": tw.get("max_pushes", 3),
         "blocking": report.get("blocking", 0),
         "warnings": report.get("warnings", 0),
